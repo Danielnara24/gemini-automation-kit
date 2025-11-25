@@ -6,11 +6,12 @@ This kit simplifies building automation tools by abstracting the complexity of m
 
 ## Features
 
-*   **Multimodal Simplified:** Pass local file paths for **Videos** or **PDFs** directly into the prompt function. The script handles MIME types and upload logic.
-*   **Structured Outputs:** Enforce strict output formats (JSON or Enums) using Pydantic models. Perfect for automation pipelines where you need code-readable data, not just chat.
-*   **Automatic Citations:** Automatically parses Google Search grounding metadata to insert inline markdown citations (e.g., `[1](url)`) and a formatted source list at the end of the response.
-*   **Tool Integration:** simple boolean flags to enable **Google Search**, **Code Execution**, and **URL Context**.
-*   **Thinking Configuration:** Support for enabling/disabling thinking (for models like `gemini-2.5-pro`).
+*   **Multimodal Simplified:** Pass local file paths for **Videos** or **PDFs** directly into the prompt function. The script automatically handles MIME types and file data.
+*   **Unified Tooling:** The main `prompt_gemini` function allows you to use **Google Search**, **Code Execution**, and **URL Context** simultaneously. The model can look up info, read a URL, and write/run code to answer a single prompt.
+*   **Structured Outputs:** A dedicated function (`prompt_gemini_structured`) enforces strict output formats (JSON or Enums) using Pydantic models. 
+    *   *Note: This is separated into its own function because the Gemini API does not currently support using Tools (like Search/Code) and strict JSON Schemas in the same request.*
+*   **Automatic Citations:** Automatically parses Google Search grounding metadata to insert inline markdown citations (e.g., `[1](url)`) and a formatted source list at the end of the text response.
+*   **Thinking Configuration:** Native support for enabling/disabling the "Thinking" process (for reasoning models like `gemini-2.5-pro`).
 
 ## Installation
 
@@ -67,10 +68,10 @@ from gemini_utils import prompt_gemini
 prompt = "What are the latest specs of the Steam Deck OLED vs the ROG Ally X?"
 
 response, tokens = prompt_gemini(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     prompt=prompt,
     google_search=True,  # Enables Search Tool
-    thinking=True        # Enables Thinking budget
+    thinking=True        # Enables Thinking
 )
 
 print(response)
@@ -85,10 +86,10 @@ You don't need to manually upload files via the API; just pass the local file pa
 video_path = "./downloads/tutorial.mp4"
 
 response, tokens = prompt_gemini(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     prompt="Summarize the steps shown in this video and extract the code used.",
     video_attachment=video_path,
-    code_execution=True # Allows the model to run code it sees
+    code_execution=True # Allows the model to run code
 )
 ```
 
@@ -97,7 +98,7 @@ response, tokens = prompt_gemini(
 pdf_path = "./documents/financial_report.pdf"
 
 response, tokens = prompt_gemini(
-    model="gemini-2.0-pro",
+    model="gemini-2.5-pro",
     prompt="Analyze the risk factors mentioned in this document.",
     pdf_attachment=pdf_path
 )
@@ -119,7 +120,7 @@ class Movie(BaseModel):
 
 # 2. Call the function with the schema
 response_data, tokens = prompt_gemini_structured(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     prompt="List 3 classic 80s sci-fi movies",
     response_schema=list[Movie] # We expect a list of movies
 )
