@@ -109,8 +109,8 @@ def add_citations(response: types.GenerateContentResponse) -> str:
     return text
 
 def prompt_gemini(
-    model: str,
-    prompt: str,
+    model: str = "gemini-2.5-flash",
+    prompt: str = "",
     video_attachment: str = None,
     pdf_attachment: str = None,
     thinking: bool = True,
