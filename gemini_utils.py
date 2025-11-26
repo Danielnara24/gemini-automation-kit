@@ -288,9 +288,9 @@ def prompt_gemini(
         return f"An error occurred during content generation: {e}", 0
 
 def prompt_gemini_structured(
-    model: str,
-    prompt: str,
-    response_schema: Any,
+    model: str = "gemini-2.5-flash",
+    prompt: str = "",
+    response_schema: Any = None,
     video_attachment: str = None,
     pdf_attachment: str = None,
     thinking: bool = True,
