@@ -1,6 +1,6 @@
 import enum
 from pydantic import BaseModel
-from gemini_utils import prompt_gemini, prompt_gemini_structured, check_api_key
+from gemini_utils import prompt_gemini, prompt_gemini_structured, prompt_gemini_3, check_api_key
 
 # --- Setup ---
 # Ensure your API key is set in your environment variables.
@@ -61,7 +61,57 @@ def run_json_test():
     for movie in response:
         print(f"- {movie.title} ({movie.year}) by {movie.director}")
 
+# --- 4. Gemini 3: High-Res Media & Thinking ---
+def run_gemini_3_test():
+    print(f"\n--- Running Gemini 3 Pro (High Res PDF + Thinking) ---")
+    
+    # Example: Reading a dense PDF with High resolution
+    # UPDATE PATH
+    pdf_path = '/home/daniel/Downloads/Fuentes/exploration-of-tpus-for-ai-applications-3xh6xnkech.pdf' 
+    
+    try:
+        response_text, tokens = prompt_gemini_3(
+            prompt="Make a summary of this pdf",
+            pdf_attachment=pdf_path,
+            thinking_level="high",      # Uses dynamic high thinking
+            media_resolution="high"     # Uses ~560 tokens per page for max OCR detail
+        )
+        print(f"Input Tokens: {tokens}")
+        print(f"Response:\n{response_text}")
+    except Exception as e:
+        print(f"Skipping Gemini 3 test: {e}")
+
+# --- 5. Gemini 3: Tools + Structured Output (Combined) ---
+# Previous models could not easily do Google Search AND Strict JSON at the same time.
+class Laptop(BaseModel):
+    model_name: str
+    price: str
+    review_score: float
+
+def run_gemini_3_structured_tool_test():
+    print(f"\n--- Running Gemini 3 Pro (Search + JSON) ---")
+    
+    # We ask it to Google Search for CURRENT info, but return a strict JSON list
+    prompt = "Search for the top 3 rated gaming laptops released in late 2024/early 2025."
+    
+    response_data, tokens = prompt_gemini_3(
+        prompt=prompt,
+        response_schema=list[Laptop],
+        google_search=True, # Tool enabled
+        thinking_level="low" # Faster response
+    )
+    
+    print(f"Input Tokens: {tokens}")
+    
+    if isinstance(response_data, list):
+        for laptop in response_data:
+            print(f"Found: {laptop.model_name} | Price: {laptop.price} | Score: {laptop.review_score}")
+    else:
+        print(response_data) # Error string
+
 if __name__ == "__main__":
-    run_text_test()
+    # run_text_test()
     # run_json_test()
-    # run_video_test() # Uncomment to run if you have a file
+    # run_video_test() # Update path first
+    # run_gemini_3_test() # Update path first
+    run_gemini_3_structured_tool_test()
