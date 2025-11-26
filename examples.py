@@ -18,6 +18,7 @@ def run_text_test():
         model=test_model,
         prompt=test_prompt,
         thinking=True,
+        google_search=True,
         url_context=True
     )
     print(f"Input Tokens: {tokens}")
@@ -61,7 +62,7 @@ def run_json_test():
     for movie in response:
         print(f"- {movie.title} ({movie.year}) by {movie.director}")
 
-# --- 4. Gemini 3: High-Res Media & Thinking ---
+# --- 4. Gemini 3: High-Res Media ---
 def run_gemini_3_test():
     print(f"\n--- Running Gemini 3 Pro (High Res PDF + Thinking) ---")
     
@@ -81,8 +82,33 @@ def run_gemini_3_test():
     except Exception as e:
         print(f"Skipping Gemini 3 test: {e}")
 
-# --- 5. Gemini 3: Tools + Structured Output (Combined) ---
-# Previous models could not easily do Google Search AND Strict JSON at the same time.
+# --- 5. Gemini 3: Search + Code ---
+def run_gemini_3_search_code_test():
+    print(f"\n--- Running Gemini 3 Pro (Search + Code Only) ---")
+    
+    # The Prompt requires:
+    # 1. Google Search: To find current population data (factual retrieval).
+    # 2. Code Execution: To perform exact math (percentage difference) rather than hallucinating numbers.
+    prompt = (
+        "Search for the current metro area populations of Tokyo and Delhi. "
+        "Then, use Python code to calculate the difference and determine exactly what "
+        "percentage larger the more populous city is compared to the smaller one."
+    )
+    
+    # We do NOT pass a response_schema, so we get a text response.
+    # The function will automatically format the search citations and code blocks.
+    response_text, tokens = prompt_gemini_3(
+        prompt=prompt,
+        google_search=True,
+        code_execution=True,
+        thinking_level="high" # 'High' is recommended for multi-step tool orchestration
+    )
+    
+    print(f"Input Tokens: {tokens}")
+    print(f"Response:\n{response_text}")
+
+# --- 6. Gemini 3: Tools + Structured Output (Combined) ---
+# Previous models could not do Google Search AND Strict JSON at the same time.
 class Laptop(BaseModel):
     model_name: str
     price: str
@@ -109,7 +135,7 @@ def run_gemini_3_structured_tool_test():
     else:
         print(response_data) # Error string
 
-# --- 6. Gemini 3: Complex Agentic Task (Search + Code + JSON) ---
+# --- 7. Gemini 3: Complex Agentic Task (Search + Code + JSON) ---
 class FinancialAnalysis(BaseModel):
     asset_a: str
     asset_b: str
@@ -137,10 +163,10 @@ def run_gemini_3_complex_test():
         # We assume prompt_gemini_3 is imported from gemini_utils
         result, tokens = prompt_gemini_3(
             prompt=prompt,
-            response_schema=FinancialAnalysis,
-            google_search=True,   # Step 1: Get Data
-            code_execution=True,  # Step 2: Process Data
-            thinking_level="high" # Ensure it plans the workflow correctly
+            response_schema=FinancialAnalysis, # Structured output format
+            google_search=True,   # Get Data
+            code_execution=True,  # Process Data
+            thinking_level="high"
         )
         
         print(f"Input Tokens: {tokens}")
@@ -158,5 +184,6 @@ if __name__ == "__main__":
     # run_json_test()
     # run_video_test() # Update path first
     # run_gemini_3_test() # Update path first
+    # run_gemini_3_search_code_test()
     # run_gemini_3_structured_tool_test()
     # run_gemini_3_complex_test()
