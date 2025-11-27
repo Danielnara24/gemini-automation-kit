@@ -3,6 +3,10 @@ import sys
 import mimetypes
 import enum
 import pathlib
+import hashlib
+import base64
+import time
+import itertools
 from typing import Any, List, Optional, Union, Dict
 
 try:
@@ -84,74 +88,189 @@ def add_citations(response: types.GenerateContentResponse) -> str:
 
     return text
 
+def get_remote_file_name(client: genai.Client, file_path: str) -> str | None:
+    """
+    Checks if a local file is already uploaded to Gemini by comparing SHA-256 hashes.
+    
+    Args:
+        client: The initialized genai.Client object.
+        file_path: The local path to the file.
+        
+    Returns:
+        str: The remote file name (e.g., 'files/abc123xyz') if found.
+        None: If the file is not found on the server.
+    """
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+    except FileNotFoundError:
+        return None
+
+    # Google stores the Hex Digest encoded in Base64
+    local_hash_b64 = base64.b64encode(sha256_hash.hexdigest().encode('utf-8')).decode('utf-8')
+
+    try:
+        # iterate through remote files looking for a match
+        for remote_file in client.files.list():
+            if remote_file.sha256_hash == local_hash_b64:
+                return remote_file.name
+    except Exception:
+        # If listing fails (e.g. permission or network), assume not found
+        return None
+            
+    return None
+
 def _process_media_attachments(
+    client: genai.Client, 
     media_paths: List[str], 
+    inline_limit_mb: float = 10.0,
     media_resolution: Optional[Dict[str, str]] = None
 ) -> Union[List[types.Part], str]:
     """
-    Helper function to process a list of file paths into Gemini API Part objects.
-    Detects Images, Videos, and PDFs.
-    
-    Returns:
-        List[types.Part]: A list of prepared parts.
-        str: An error message string if a file cannot be processed.
+    Processes media files. Checks for existing remote files, calculates optimal 
+    inline vs upload separation to keep inline data under the limit, uploads 
+    necessary files, and returns a list of prepared Gemini Parts.
     """
     if not media_paths:
         return []
 
-    parts = []
-    video_count = 0
-
+    final_parts = []
+    
+    # Candidates for local processing: (path, size_bytes, mime_type)
+    local_candidates = []
+    
+    # 1. First Pass: Validation, Mime Detection, and Remote Check
     for path in media_paths:
         if not path:
             continue
-            
+        
         file_path = pathlib.Path(path)
         if not file_path.exists():
             return f"Error: File not found at '{path}'"
 
-        # Guess MIME type
         mime_type, _ = mimetypes.guess_type(path)
-        
         if not mime_type:
             return f"Error: Could not determine MIME type for '{path}'."
+        
+        # Check supported types
+        if not (mime_type.startswith("image/") or mime_type.startswith("video/") or mime_type == "application/pdf"):
+             return f"Error: Unsupported file type '{mime_type}' for file '{path}'."
 
-        # Read file bytes
-        try:
-            file_bytes = file_path.read_bytes()
-        except Exception as e:
-            return f"Error reading file '{path}': {e}"
-
-        # Categorize and create Part
-        if mime_type.startswith("image/"):
-            # Supported: png, jpeg, webp, heic, heif
-            parts.append(types.Part(
-                inline_data=types.Blob(data=file_bytes, mime_type=mime_type),
-                media_resolution=media_resolution
-            ))
-        elif mime_type.startswith("video/"):
-            video_count += 1
-            parts.append(types.Part(
-                inline_data=types.Blob(data=file_bytes, mime_type=mime_type),
-                media_resolution=media_resolution
-            ))
-        elif mime_type == "application/pdf":
-            parts.append(types.Part(
-                inline_data=types.Blob(data=file_bytes, mime_type=mime_type),
+        # Check if already uploaded
+        remote_name = get_remote_file_name(client, path)
+        if remote_name:
+            # It's already there, just add the reference
+            final_parts.append(types.Part(
+                file_data=types.FileData(file_uri=f"https://generativelanguage.googleapis.com/v1beta/{remote_name}", mime_type=mime_type),
                 media_resolution=media_resolution
             ))
         else:
-            return f"Error: Unsupported file type '{mime_type}' for file '{path}'. Supported types are Images, Videos, and PDFs."
+            # It's a candidate for local logic (inline vs upload)
+            file_size = file_path.stat().st_size
+            local_candidates.append({
+                "path": path,
+                "size": file_size,
+                "mime": mime_type,
+                "path_obj": file_path
+            })
 
-    if video_count > 1:
-        print(f"Warning: {video_count} videos detected. While supported by newer models, it is generally recommended to use fewer videos per request for optimal results.")
+    if not local_candidates:
+        return final_parts
 
-    return parts
+    # 2. Optimization Logic: Subset Sum Problem
+    # We want to maximize the size of files kept inline such that Sum(inline) <= Limit
+    limit_bytes = inline_limit_mb * 1024 * 1024
+    
+    inline_files = []
+    upload_files = []
+
+    # Calculate total size
+    total_candidate_size = sum(c["size"] for c in local_candidates)
+
+    if total_candidate_size <= limit_bytes:
+        # All fit inline
+        inline_files = local_candidates
+    else:
+        # Find optimal subset for inline
+        # Generate all combinations. 
+        # Safety limit: if too many files, fallback to simple greedy (smallest first) to avoid hanging
+        if len(local_candidates) > 20:
+            # Greedy approach
+            sorted_candidates = sorted(local_candidates, key=lambda x: x["size"])
+            current_sum = 0
+            for c in sorted_candidates:
+                if current_sum + c["size"] <= limit_bytes:
+                    inline_files.append(c)
+                    current_sum += c["size"]
+                else:
+                    upload_files.append(c)
+        else:
+            # Optimal combinations approach
+            best_sum = 0
+            best_combination = []
+            
+            # Helper to get indices
+            indices = range(len(local_candidates))
+            
+            for r in range(len(local_candidates) + 1):
+                for subset_indices in itertools.combinations(indices, r):
+                    current_subset = [local_candidates[i] for i in subset_indices]
+                    current_size = sum(x["size"] for x in current_subset)
+                    
+                    if current_size <= limit_bytes:
+                        if current_size > best_sum:
+                            best_sum = current_size
+                            best_combination = current_subset
+            
+            inline_files = best_combination
+            # The rest go to upload
+            inline_paths = set(x["path"] for x in inline_files)
+            upload_files = [x for x in local_candidates if x["path"] not in inline_paths]
+
+    # 3. Process Inline Files
+    for item in inline_files:
+        try:
+            file_bytes = item["path_obj"].read_bytes()
+            final_parts.append(types.Part(
+                inline_data=types.Blob(data=file_bytes, mime_type=item["mime"]),
+                media_resolution=media_resolution
+            ))
+        except Exception as e:
+            return f"Error reading file '{item['path']}': {e}"
+
+    # 4. Process Upload Files
+    for item in upload_files:
+        print(f"Uploading '{item['path']}' ({item['size']/1024/1024:.2f} MB)...")
+        try:
+            uploaded_file = client.files.upload(file=item["path"])
+            
+            # Wait for ACTIVE state
+            while True:
+                myfile = client.files.get(name=uploaded_file.name)
+                if myfile.state.name == "ACTIVE":
+                    break
+                elif myfile.state.name == "FAILED":
+                    return f"Error: File processing failed for '{item['path']}' on Google's side."
+                time.sleep(2)
+            
+            final_parts.append(types.Part(
+                file_data=types.FileData(file_uri=myfile.uri, mime_type=item["mime"]),
+                media_resolution=media_resolution
+            ))
+            print(f"Upload complete: {item['path']}")
+            
+        except Exception as e:
+            return f"Error uploading file '{item['path']}': {e}"
+
+    return final_parts
 
 def prompt_gemini(
     model: str = "gemini-2.5-flash",
     prompt: str = "",
     media_attachments: List[str] = None,
+    inline_data_limit: float = 10.0,
     thinking: bool = True,
     temperature: float = 1.0,
     google_search: bool = False,
@@ -166,6 +285,7 @@ def prompt_gemini(
         prompt (str): The text prompt to send to the model.
         media_attachments (List[str], optional): A list of file paths to local images, videos, 
                                                  or PDFs to include in the prompt. Defaults to None.
+        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Controls randomness. Defaults to 1.0.
         google_search (bool, optional): Enables grounding with Google Search. Defaults to False.
@@ -196,10 +316,10 @@ def prompt_gemini(
             tools=tools if tools else None
         )
 
-        # Process Media Attachments
+        # Process Media Attachments using the new uploader
         media_parts = []
         if media_attachments:
-            result = _process_media_attachments(media_attachments)
+            result = _process_media_attachments(client, media_attachments, inline_limit_mb=inline_data_limit)
             if isinstance(result, str): # Error message
                 return result, 0
             media_parts = result
@@ -266,6 +386,7 @@ def prompt_gemini_structured(
     prompt: str = "",
     response_schema: Any = None,
     media_attachments: List[str] = None,
+    inline_data_limit: float = 10.0,
     thinking: bool = True,
     temperature: float = 1.0
 ):
@@ -278,6 +399,7 @@ def prompt_gemini_structured(
         response_schema (Any): The schema for the structured output (Pydantic model or Enum).
         media_attachments (List[str], optional): A list of file paths to local images, videos, 
                                                  or PDFs. Defaults to None.
+        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Creativity allowed. Defaults to 1.0.
 
@@ -302,7 +424,7 @@ def prompt_gemini_structured(
         # Process Media Attachments
         media_parts = []
         if media_attachments:
-            result = _process_media_attachments(media_attachments)
+            result = _process_media_attachments(client, media_attachments, inline_limit_mb=inline_data_limit)
             if isinstance(result, str): # Error message
                 return result, 0
             media_parts = result
@@ -328,6 +450,7 @@ def prompt_gemini_3(
     prompt: str = "",
     response_schema: Any = None,
     media_attachments: List[str] = None,
+    inline_data_limit: float = 10.0,
     thinking_level: str = "high", 
     media_resolution: str = "medium",
     temperature: float = 1.0,
@@ -343,6 +466,7 @@ def prompt_gemini_3(
         prompt (str): The text prompt.
         response_schema (Any, optional): Structured output schema.
         media_attachments (List[str], optional): List of file paths (Images, Videos, PDFs).
+        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking_level (str): "low" (faster) or "high" (deep reasoning). Defaults to "high".
         media_resolution (str): "low", "medium", or "high". Applies to images, videos and PDFs.
         temperature (float): Defaults to 1.0.
@@ -380,7 +504,13 @@ def prompt_gemini_3(
         
         # Add Media Attachments with Resolution Config
         if media_attachments:
-            result = _process_media_attachments(media_attachments, media_resolution=resolution_config)
+            # Pass the v1alpha client and resolution config to the uploader
+            result = _process_media_attachments(
+                client, 
+                media_attachments, 
+                inline_limit_mb=inline_data_limit,
+                media_resolution=resolution_config
+            )
             if isinstance(result, str): # Error message
                 return result, 0
             parts.extend(result)
@@ -396,7 +526,6 @@ def prompt_gemini_3(
             selected_thinking_level = "high"
         
         # Note: Do not mix thinking_budget with thinking_level.
-        # include_thoughts=True makes the thoughts visible in response (optional but useful).
         thinking_config = types.ThinkingConfig(
             thinking_level=selected_thinking_level.upper(),
             include_thoughts=True
