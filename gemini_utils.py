@@ -266,6 +266,29 @@ def _process_media_attachments(
 
     return final_parts
 
+def delete_all_uploads():
+    client = genai.Client()
+    
+    print("Checking for uploaded files...")
+    
+    # client.files.list() returns an iterator of all files
+    files = list(client.files.list())
+    
+    if not files:
+        print("No files found.")
+        return
+
+    print(f"Found {len(files)} files. Starting deletion...")
+
+    for f in files:
+        print(f"Deleting {f.name}...")
+        try:
+            client.files.delete(name=f.name)
+        except Exception as e:
+            print(f"Failed to delete {f.name}: {e}")
+
+    print("Cleanup complete.")
+
 def prompt_gemini(
     model: str = "gemini-2.5-flash",
     prompt: str = "",
