@@ -294,7 +294,7 @@ def prompt_gemini(
     model: str = "gemini-2.5-flash",
     prompt: str = "",
     media_attachments: List[str] = None,
-    inline_data_limit: float = 10.0,
+    upload_threshold_mb: float = 10.0,
     thinking: bool = True,
     temperature: float = 1.0,
     google_search: bool = False,
@@ -309,7 +309,7 @@ def prompt_gemini(
         prompt (str): The text prompt to send to the model.
         media_attachments (List[str], optional): A list of file paths to local images, videos, 
                                                  or PDFs to include in the prompt. Defaults to None.
-        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
+        upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Controls randomness. Defaults to 1.0.
         google_search (bool, optional): Enables grounding with Google Search. Defaults to False.
@@ -343,7 +343,7 @@ def prompt_gemini(
         # Process Media Attachments using the new uploader
         media_parts = []
         if media_attachments:
-            result = _process_media_attachments(client, media_attachments, inline_limit_mb=inline_data_limit)
+            result = _process_media_attachments(client, media_attachments, inline_limit_mb=upload_threshold_mb)
             if isinstance(result, str): # Error message
                 return result, 0
             media_parts = result
@@ -410,7 +410,7 @@ def prompt_gemini_structured(
     prompt: str = "",
     response_schema: Any = None,
     media_attachments: List[str] = None,
-    inline_data_limit: float = 10.0,
+    upload_threshold_mb: float = 10.0,
     thinking: bool = True,
     temperature: float = 1.0
 ):
@@ -423,7 +423,7 @@ def prompt_gemini_structured(
         response_schema (Any): The schema for the structured output (Pydantic model or Enum).
         media_attachments (List[str], optional): A list of file paths to local images, videos, 
                                                  or PDFs. Defaults to None.
-        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
+        upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Creativity allowed. Defaults to 1.0.
 
@@ -448,7 +448,7 @@ def prompt_gemini_structured(
         # Process Media Attachments
         media_parts = []
         if media_attachments:
-            result = _process_media_attachments(client, media_attachments, inline_limit_mb=inline_data_limit)
+            result = _process_media_attachments(client, media_attachments, inline_limit_mb=upload_threshold_mb)
             if isinstance(result, str): # Error message
                 return result, 0
             media_parts = result
@@ -474,7 +474,7 @@ def prompt_gemini_3(
     prompt: str = "",
     response_schema: Any = None,
     media_attachments: List[str] = None,
-    inline_data_limit: float = 10.0,
+    upload_threshold_mb: float = 10.0,
     thinking_level: str = "high", 
     media_resolution: str = "medium",
     temperature: float = 1.0,
@@ -490,7 +490,7 @@ def prompt_gemini_3(
         prompt (str): The text prompt.
         response_schema (Any, optional): Structured output schema.
         media_attachments (List[str], optional): List of file paths (Images, Videos, PDFs).
-        inline_data_limit (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
+        upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 10.0.
         thinking_level (str): "low" (faster) or "high" (deep reasoning). Defaults to "high".
         media_resolution (str): "low", "medium", or "high". Applies to images, videos and PDFs.
         temperature (float): Defaults to 1.0.
@@ -532,7 +532,7 @@ def prompt_gemini_3(
             result = _process_media_attachments(
                 client, 
                 media_attachments, 
-                inline_limit_mb=inline_data_limit,
+                inline_limit_mb=upload_threshold_mb,
                 media_resolution=resolution_config
             )
             if isinstance(result, str): # Error message
