@@ -28,9 +28,6 @@ def check_api_key():
     """
     Checks if the Gemini API key is set in the environment variables.
 
-    If the key is not found, it prints detailed instructions on how to set it
-    on Windows.
-
     Returns:
         bool: True if the key is found, False otherwise.
     """
@@ -181,6 +178,7 @@ def prompt_gemini(
     """
     try:
         client = genai.Client()
+        # Standard models use thinking_budget
         thinking_budget = -1 if thinking else 0
 
         # Prepare tools
@@ -356,9 +354,10 @@ def prompt_gemini_3(
         tuple (Any, int): (Response, Token_Count).
     """
     try:
+        # Gemini 3 features require v1alpha
         client = genai.Client(http_options={'api_version': 'v1alpha'})
 
-        # Tools
+        # --- Tools ---
         tools = []
         if google_search:
             tools.append(types.Tool(google_search=types.GoogleSearch()))
@@ -367,7 +366,7 @@ def prompt_gemini_3(
         if url_context:
             tools.append(types.Tool(url_context={}))
 
-        # Media Resolution
+        # --- Media Resolution ---
         res_map = {
             "low": "media_resolution_low",
             "medium": "media_resolution_medium",
@@ -376,7 +375,7 @@ def prompt_gemini_3(
         selected_resolution = res_map.get(media_resolution.lower(), "media_resolution_medium")
         resolution_config = {"level": selected_resolution}
 
-        # Process Content
+        # --- Content Processing ---
         parts = []
         
         # Add Media Attachments with Resolution Config
@@ -389,7 +388,21 @@ def prompt_gemini_3(
         # Add Text
         parts.append(types.Part(text=prompt))
 
-        # Config
+        # --- Thinking Config ---
+        # Map user input to "LOW" or "HIGH". Default is "HIGH".
+        valid_levels = ["low", "high"]
+        selected_thinking_level = thinking_level.lower()
+        if selected_thinking_level not in valid_levels:
+            selected_thinking_level = "high"
+        
+        # Note: Do not mix thinking_budget with thinking_level.
+        # include_thoughts=True makes the thoughts visible in response (optional but useful).
+        thinking_config = types.ThinkingConfig(
+            thinking_level=selected_thinking_level.upper(),
+            include_thoughts=True
+        )
+
+        # --- MIME Type & Schema ---
         response_mime_type = "text/plain"
         if response_schema:
             if isinstance(response_schema, type) and issubclass(response_schema, enum.Enum):
@@ -399,12 +412,13 @@ def prompt_gemini_3(
 
         generation_config = types.GenerateContentConfig(
             temperature=temperature,
-            thinking_config=types.ThinkingConfig(include_thoughts=True),
+            thinking_config=thinking_config,
             response_mime_type=response_mime_type,
             response_schema=response_schema,
             tools=tools if tools else None
         )
 
+        # --- Generation ---
         response = client.models.generate_content(
             model=model,
             contents=[types.Content(parts=parts)],
@@ -413,6 +427,7 @@ def prompt_gemini_3(
 
         input_token_count = response.usage_metadata.prompt_token_count
 
+        # --- Output Handling ---
         if response_schema:
             return response.parsed, input_token_count
 
