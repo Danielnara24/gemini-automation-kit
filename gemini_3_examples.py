@@ -32,7 +32,7 @@ class VideoAnalysis(BaseModel):
 # Use Case Examples
 # ==========================================
 
-def example_1_url_context_low_thinking():
+def example_url_context_low_thinking():
     """
     1. Simple text use case with URL context. Low thinking level.
     """
@@ -53,7 +53,7 @@ def example_1_url_context_low_thinking():
     print(f"Response:\n{response}")
 
 
-def example_2_search_structured():
+def example_search_structured():
     """
     2. Simple structured output case with google search.
     """
@@ -76,7 +76,7 @@ def example_2_search_structured():
     print(f"Attractions: {', '.join(response.top_attractions)}")
 
 
-def example_3_code_structured():
+def example_code_structured():
     """
     3. Simple structured output case with code execution.
     """
@@ -97,7 +97,7 @@ def example_3_code_structured():
     print(f"Result: {response.final_numeric_result}")
 
 
-def example_4_search_code_low_thinking():
+def example_search_code_low_thinking():
     """
     4. Google search example with code execution. Low thinking level.
     """
@@ -121,7 +121,7 @@ def example_4_search_code_low_thinking():
     print(f"Response:\n{response}")
 
 
-def example_5_video_structured_placeholder():
+def example_video_structured_placeholder():
     """
     5. Video path placeholder example with structured output.
     """
@@ -150,7 +150,7 @@ def example_5_video_structured_placeholder():
         print(f"[{event.timestamp}] {event.description}")
 
 
-def example_6_multi_pdf_low_res():
+def example_multi_pdf_low_res():
     """
     6. 3 Pdf paths placeholders, prompting to make a summary of all 3. Low media resolution.
     """
@@ -183,7 +183,7 @@ def example_6_multi_pdf_low_res():
     print(f"Response:\n{response}")
 
 
-def example_7_image_sequence():
+def example_image_sequence():
     """
     7. 5 image paths placeholders, prompting to explain the image sequence.
     """
@@ -216,7 +216,7 @@ def example_7_image_sequence():
     print(f"Response:\n{response}")
 
 
-def example_8_mixed_media_low_res():
+def example_mixed_media_low_res():
     """
     8. Video, PDF and 2 image placeholders, prompting to explain how they relate. Low media resolution.
     """
@@ -258,16 +258,16 @@ if __name__ == "__main__":
         
         # Uncomment the function you wish to run:
 
-        # example_1_url_context_low_thinking()
-        # example_2_search_structured()
-        # example_3_code_structured()
-        # example_4_search_code_low_thinking()
+        # example_url_context_low_thinking()
+        # example_search_structured()
+        # example_code_structured()
+        # example_search_code_low_thinking()
 
         # NOTE: For the following, ensure you create the files or update paths:
-        # example_5_video_structured_placeholder()
-        # example_6_multi_pdf_low_res()
-        # example_7_image_sequence()
-        # example_8_mixed_media_low_res()
+        # example_video_structured_placeholder()
+        # example_multi_pdf_low_res()
+        # example_image_sequence()
+        # example_mixed_media_low_res()
 
         # Utility to clean up cloud storage after testing heavy media
         # delete_all_uploads()

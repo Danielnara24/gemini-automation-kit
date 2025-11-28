@@ -33,7 +33,7 @@ class VideoLog(BaseModel):
 # Use Case Examples
 # ==========================================
 
-def example_1_url_context():
+def example_url_context():
     """
     1. Simple text use case with URL context. 
     Model: gemini-2.5-flash
@@ -53,7 +53,7 @@ def example_1_url_context():
     print(f"Response:\n{response}")
 
 
-def example_2_structured_no_tools():
+def example_structured_no_tools():
     """
     2. Simple structured output case with no tools. 
     Model: gemini-2.5-pro
@@ -77,7 +77,7 @@ def example_2_structured_no_tools():
         print(f" - {char.name}: {char.role}")
 
 
-def example_3_search_and_code():
+def example_search_and_code():
     """
     3. Google search example with code execution. 
     Model: gemini-2.5-flash
@@ -101,7 +101,7 @@ def example_3_search_and_code():
     print(f"Response:\n{response}")
 
 
-def example_4_video_structured():
+def example_video_structured():
     """
     4. Video path placeholder example with structured output. 
     Model: gemini-2.5-pro
@@ -130,7 +130,7 @@ def example_4_video_structured():
         print(f"[{seg.timestamp_start} - {seg.timestamp_end}] {seg.activity_description} ({seg.mood})")
 
 
-def example_5_multi_pdf_summary():
+def example_multi_pdf_summary():
     """
     5. 3 Pdf paths placeholders, prompting to make a summary of all 3. 
     Model: gemini-2.5-pro
@@ -162,7 +162,7 @@ def example_5_multi_pdf_summary():
     print(f"Response:\n{response}")
 
 
-def example_6_image_sequence():
+def example_image_sequence():
     """
     6. 5 image paths placeholders, prompting to explain the image sequence. 
     Model: gemini-2.5-flash
@@ -195,7 +195,7 @@ def example_6_image_sequence():
     print(f"Response:\n{response}")
 
 
-def example_7_mixed_media():
+def example_mixed_media():
     """
     7. Video, PDF and 2 image placeholders, prompting to explain how they relate. 
     Model: gemini-2.5-pro
@@ -240,15 +240,15 @@ if __name__ == "__main__":
         
         # Uncomment the function you wish to run:
         
-        # example_1_url_context()
-        # example_2_structured_no_tools()
-        # example_3_search_and_code()
+        # example_url_context()
+        # example_structured_no_tools()
+        # example_search_and_code()
         
         # NOTE: For the following, ensure you create the files or update paths:
-        # example_4_video_structured()
-        # example_5_multi_pdf_summary()
-        # example_6_image_sequence()
-        # example_7_mixed_media()
+        # example_video_structured()
+        # example_multi_pdf_summary()
+        # example_image_sequence()
+        # example_mixed_media()
         
         # Utility to clean up cloud storage after testing heavy media
         # delete_all_uploads()
