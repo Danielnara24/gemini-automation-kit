@@ -230,6 +230,59 @@ def example_mixed_media():
     print(f"Response:\n{response}")
 
 
+def example_youtube_simple_url():
+    """
+    9. Simple YouTube URL.
+    """
+    print("--- Running Example 10: YouTube URL ---")
+    
+    media_files = ["https://youtu.be/chr2I7CZTfk?si=wMwiIRcj0bP6uStj"]
+
+    response, tokens = prompt_gemini(
+        model="gemini-2.5-pro",
+        prompt="Make a summary of this video",
+        media_attachments=media_files
+    )
+
+    print(f"Input Tokens: {tokens}")
+    print(f"Response:\n{response}")
+
+
+def example_youtube_timestamps_summary():
+    """
+    10. Two YouTube videos: One using "MM:SS" timestamps, one using seconds (int/str).
+    """
+    print("--- Running Example 9: YouTube Segments (Mixed Timestamps) ---")
+    
+    # We define specific segments of interest.
+    # Video 1: Uses MM:SS format.
+    # Video 2: Uses raw seconds (integer).
+    
+    media_files = [
+        {
+            "url": "https://youtu.be/6Q-ESEmDf4Q?si=04n8U1IQ00LAS7xi",
+            "start": 4,   # 4 seconds (0:04 mark)
+            "end": 200    # 200 seconds (3:20 mark)
+        },
+        {
+            "url": "https://youtu.be/aR20FWCCjAs?si=_qs59P-bdOCmrRJX",
+            "start": "18:49",
+            "end": "25:13"
+        }
+    ]
+
+    prompt = "Compare the topics discussed in these two specific video segments."
+
+    response, tokens = prompt_gemini(
+        model="gemini-2.5-pro",
+        prompt=prompt,
+        media_attachments=media_files
+    )
+
+    print(f"Input Tokens: {tokens}")
+    print(f"Response:\n{response}")
+
+
 # ==========================================
 # Main Execution Block
 # ==========================================
@@ -243,6 +296,8 @@ if __name__ == "__main__":
         # example_url_context()
         # example_structured_no_tools()
         # example_search_and_code()
+        example_youtube_simple_url()
+        example_youtube_timestamps_summary()
         
         # NOTE: For the following, ensure you create the files or update paths:
         # example_video_structured()

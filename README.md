@@ -1,4 +1,4 @@
-# Gemini Automation Kit
+# Gemini API Toolkit
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-Yes-brightgreen.svg)
@@ -37,9 +37,9 @@ Use **`prompt_gemini_structured`** for `gemini-2.5-flash` and `gemini-2.5-pro`.
 
 All 3 functions accept a `media_attachments` argument (a list of file paths).
 
-Simply pass a list of local file paths. The kit automatically detects MIME types for **Videos**, **Images**, and **PDFs**.
+Simply pass a list of local file paths or YouTube URLs. The kit automatically detects MIME types for **Videos**, **Images**, and **PDFs**.
 ```python
-media_attachments=["image.png", "video.mp4", "document.pdf"]
+media_attachments=["image.png", "video.mp4", "document.pdf", "https://youtu.be/a1b2c3"]
 ```
 
 ### Inline vs. Files API
@@ -140,8 +140,7 @@ files = [
 response, tokens = prompt_gemini(
     model="gemini-2.5-pro",
     prompt="Compare the specifications in the PDF with the device shown in the video.",
-    media_attachments=files,
-    upload_threshold_mb=15.0 # Force upload if files > 15MB
+    media_attachments=files
 )
 
 print(response)
