@@ -14,3 +14,5 @@ Thumbs.db
 
 # Distribution / packaging
 dist/
+examples/RawSDK.py
+examples/WithScript.py
