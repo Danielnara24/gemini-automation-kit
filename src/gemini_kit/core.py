@@ -7,25 +7,10 @@ import hashlib
 import base64
 import time
 import itertools
+import google.genai as genai
+from google.genai import types
+from pydantic import BaseModel
 from typing import Any, List, Optional, Union, Dict
-
-try:
-    import google.genai as genai
-    from google.genai import types
-except ImportError:
-    print("The 'google-genai' package is not installed.")
-    print("Please install it by running the following command in your terminal:")
-    print("pip install -q -U google-genai")
-    sys.exit(1)
-
-try:
-    from pydantic import BaseModel
-except ImportError:
-    print("The 'pydantic' package is not installed.")
-    print("It is needed for the structured response feature.")
-    print("Please install it by running the following command in your terminal:")
-    print("pip install -q -U pydantic")
-    sys.exit(1)
 
 
 def check_api_key():

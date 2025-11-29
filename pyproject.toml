@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemini-automation-kit"
+version = "0.1.0"
+authors = [{ name="Danielnara24" },]
+description = "A robust, lightweight Python wrapper for the Google Gemini API."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "google-genai",
+    "pydantic"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Danielnara24/gemini-automation-kit"
+"Bug Tracker" = "https://github.com/Danielnara24/gemini-automation-kit/issues"
+
+# This tells the builder to look in 'src' for the package
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemini_kit"]

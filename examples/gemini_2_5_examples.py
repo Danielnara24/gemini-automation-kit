@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from gemini_utils import prompt_gemini, prompt_gemini_structured, delete_all_uploads, check_api_key
+from src.gemini_kit.core import prompt_gemini, prompt_gemini_structured, delete_all_uploads, check_api_key
 
 # ==========================================
 # Pydantic Schemas for Structured Examples
