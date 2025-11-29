@@ -1,6 +1,7 @@
 # Gemini API Toolkit
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI Version](https://img.shields.io/pypi/v/gemini-api-toolkit)](https://pypi.org/project/gemini-api-toolkit/)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-Yes-brightgreen.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
