@@ -234,7 +234,7 @@ def example_youtube_simple_url():
     """
     9. Simple YouTube URL.
     """
-    print("--- Running Example 10: YouTube URL ---")
+    print("--- Running Example 9: YouTube URL ---")
     
     media_files = ["https://youtu.be/chr2I7CZTfk?si=wMwiIRcj0bP6uStj"]
 
