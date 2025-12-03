@@ -289,7 +289,7 @@ def _process_media_attachments(
                     break
                 elif myfile.state.name == "FAILED":
                     return f"Error: File processing failed for '{item['path']}' on Google's side."
-                time.sleep(2)
+                time.sleep(1)
             
             file_uri = f"https://generativelanguage.googleapis.com/v1beta/{myfile.name}"
             
@@ -336,7 +336,8 @@ def prompt_gemini(
     temperature: float = 1.0,
     google_search: bool = False,
     code_execution: bool = False,
-    url_context: bool = False
+    url_context: bool = False,
+    max_retries: int = 0
 ):
     """
     Generates content using a Gemini LLM, with optional multimodal inputs (Images, Video, PDF).
@@ -352,6 +353,7 @@ def prompt_gemini(
         google_search (bool, optional): Enables grounding with Google Search. Defaults to False.
         code_execution (bool, optional): Enables the code execution tool. Defaults to False.
         url_context (bool, optional): Enables the URL context tool. Defaults to False.
+        max_retries (int, optional): Number of times to retry the API call if it fails. Defaults to 0.
 
     Returns:
         tuple (str, int): A tuple containing the generated text response and the number of input tokens.
@@ -389,12 +391,23 @@ def prompt_gemini(
         text_part = types.Part(text=prompt)
         contents = media_parts + [text_part]
 
-        # Call API
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config
-        )
+        # Call API with retry logic
+        response = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config
+                )
+                # If successful, break the retry loop
+                break
+            except Exception as e:
+                # If this was the last attempt, raise the exception to be handled by the outer block
+                if attempt == max_retries:
+                    raise e
+                # Otherwise wait a brief period and try again
+                time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
         full_response = ""
@@ -449,7 +462,8 @@ def prompt_gemini_structured(
     media_attachments: List[str] = None,
     upload_threshold_mb: float = 20.0,
     thinking: bool = True,
-    temperature: float = 1.0
+    temperature: float = 1.0,
+    max_retries: int = 0
 ):
     """
     Generates structured content (JSON/Enum) using a Gemini LLM, with optional multimodal inputs.
@@ -463,6 +477,7 @@ def prompt_gemini_structured(
         upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Creativity allowed. Defaults to 1.0.
+        max_retries (int, optional): Number of times to retry the API call if it fails. Defaults to 0.
 
     Returns:
         tuple (Any, int): A tuple containing the structured response and input tokens.
@@ -494,11 +509,23 @@ def prompt_gemini_structured(
         text_part = types.Part(text=prompt)
         contents = media_parts + [text_part]
 
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config
-        )
+        # Call API with retry logic
+        response = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config
+                )
+                # If successful, break the retry loop
+                break
+            except Exception as e:
+                # If this was the last attempt, raise the exception to be handled by the outer block
+                if attempt == max_retries:
+                    raise e
+                # Otherwise wait a brief period and try again
+                time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
         return response.parsed, input_token_count
@@ -517,7 +544,8 @@ def prompt_gemini_3(
     temperature: float = 1.0,
     google_search: bool = False,
     code_execution: bool = False,
-    url_context: bool = False
+    url_context: bool = False,
+    max_retries: int = 1
 ):
     """
     A specialized wrapper for the Gemini 3 model family (e.g., gemini-3-pro-preview).
@@ -534,6 +562,7 @@ def prompt_gemini_3(
         google_search (bool): Enable Google Search grounding.
         code_execution (bool): Enable Python code execution.
         url_context (bool): Enable URL reading.
+        max_retries (int, optional): Number of times to retry the API call if it fails. Defaults to 0.
 
     Returns:
         tuple (Any, int): (Response, Token_Count).
@@ -608,12 +637,23 @@ def prompt_gemini_3(
             tools=tools if tools else None
         )
 
-        # --- Generation ---
-        response = client.models.generate_content(
-            model=model,
-            contents=[types.Content(parts=parts)],
-            config=generation_config
-        )
+        # --- Generation with Retry Logic ---
+        response = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[types.Content(parts=parts)],
+                    config=generation_config
+                )
+                # If successful, break the retry loop
+                break
+            except Exception as e:
+                # If this was the last attempt, raise the exception to be handled by the outer block
+                if attempt == max_retries:
+                    raise e
+                # Otherwise wait a brief period and try again
+                time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
 
