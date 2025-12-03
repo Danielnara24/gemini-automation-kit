@@ -158,7 +158,7 @@ response, tokens = prompt_gemini(
 print(response)
 ```
 
-### 2. Mixed Media (Video, PDF, Images)
+### 2. Mixed Media (Video, PDF, Images, Audio)
 Pass local file paths or YouTube URLs. The kit handles upload/inline logic automatically.
 ```python
 from gemini_kit import prompt_gemini
@@ -209,7 +209,7 @@ delete_all_uploads()
 *   **model:** The name of the Gemini model to use (e.g., "gemini-2.5-flash", "gemini-3-pro-preview").
 *   **prompt:** The text instruction sent to the model.
 *   **response_schema:** Pydantic model or Enum class to enforce structured JSON output.
-*   **media_attachments:** List of file paths (images, videos, PDFs) or YouTube URLs to analyze.
+*   **media_attachments:** List of file paths (audio, images, videos, PDFs) or YouTube URLs to analyze.
 *   **upload_threshold_mb:** Files larger than this (in MB) are uploaded via Files API; smaller are sent inline.
 *   **thinking_level:** Controls reasoning depth for Gemini 3 ("low" or "high").
 *   **thinking:** Boolean to enable/disable the thinking process for Gemini 2.5.
