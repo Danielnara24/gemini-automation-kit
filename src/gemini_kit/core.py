@@ -406,8 +406,12 @@ def prompt_gemini(
                 # If this was the last attempt, raise the exception to be handled by the outer block
                 if attempt == max_retries:
                     raise e
-                # Otherwise wait a brief period and try again
-                time.sleep(1)
+                
+                # Check for RPM error
+                if "GenerateRequestsPerMinute" in str(e):
+                    time.sleep(60)
+                else:
+                    time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
         full_response = ""
@@ -524,8 +528,12 @@ def prompt_gemini_structured(
                 # If this was the last attempt, raise the exception to be handled by the outer block
                 if attempt == max_retries:
                     raise e
-                # Otherwise wait a brief period and try again
-                time.sleep(1)
+                
+                # Check for RPM error
+                if "GenerateRequestsPerMinute" in str(e):
+                    time.sleep(60)
+                else:
+                    time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
         return response.parsed, input_token_count
@@ -545,7 +553,7 @@ def prompt_gemini_3(
     google_search: bool = False,
     code_execution: bool = False,
     url_context: bool = False,
-    max_retries: int = 1
+    max_retries: int = 0
 ):
     """
     A specialized wrapper for the Gemini 3 model family (e.g., gemini-3-pro-preview).
@@ -652,8 +660,12 @@ def prompt_gemini_3(
                 # If this was the last attempt, raise the exception to be handled by the outer block
                 if attempt == max_retries:
                     raise e
-                # Otherwise wait a brief period and try again
-                time.sleep(1)
+                
+                # Check for RPM error
+                if "GenerateRequestsPerMinute" in str(e):
+                    time.sleep(60)
+                else:
+                    time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
 
