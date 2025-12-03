@@ -12,9 +12,9 @@ import google.genai as genai
 from google.genai import types
 from pydantic import BaseModel
 from typing import Any, List, Optional, Union, Dict
-# Initialize logger for this module
-logger = logging.getLogger(__name__) # <--- Add this
 
+# Initialize logger for this module
+logger = logging.getLogger(__name__)
 
 def check_api_key():
     """
@@ -151,6 +151,7 @@ def _process_media_attachments(
 ) -> Union[List[types.Part], str]:
     """
     Processes media files (Local paths, YouTube URLs, and YouTube Dicts with timestamps).
+    Supports Images, Videos, Audio, and PDFs.
     """
     if not media_paths:
         return []
@@ -195,7 +196,7 @@ def _process_media_attachments(
             final_parts.append(types.Part(**part_args))
             continue
             
-        # --- 3. Local File Processing (Existing Logic) ---
+        # --- 3. Local File Processing ---
         path = target_path_or_url
         file_path = pathlib.Path(path)
         
@@ -210,7 +211,15 @@ def _process_media_attachments(
             logger.error(msg)
             return msg
         
-        if not (mime_type.startswith("image/") or mime_type.startswith("video/") or mime_type == "application/pdf"):
+        # Supported types
+        is_supported = (
+            mime_type.startswith("image/") or 
+            mime_type.startswith("video/") or 
+            mime_type.startswith("audio/") or 
+            mime_type == "application/pdf"
+        )
+        
+        if not is_supported:
              msg = f"Error: Unsupported file type '{mime_type}' for file '{path}'."
              logger.error(msg)
              return msg
@@ -356,15 +365,15 @@ def prompt_gemini(
     google_search: bool = False,
     code_execution: bool = False,
     url_context: bool = False,
-    max_retries: int = 10
+    max_retries: int = 0
 ):
     """
-    Generates content using a Gemini LLM, with optional multimodal inputs (Images, Video, PDF).
+    Generates content using a Gemini LLM, with optional multimodal inputs (Audio, Images, Video, PDF).
 
     Args:
         model (str): The name of the Gemini model to use.
         prompt (str): The text prompt to send to the model.
-        media_attachments (List[str], optional): A list of file paths to local images, videos, 
+        media_attachments (List[str], optional): A list of file paths to local audio, images, videos, 
                                                  or PDFs to include in the prompt. Defaults to None.
         upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
@@ -496,7 +505,7 @@ def prompt_gemini_structured(
         model (str): The name of the Gemini model to use.
         prompt (str): The text prompt.
         response_schema (Any): The schema for the structured output (Pydantic model or Enum).
-        media_attachments (List[str], optional): A list of file paths to local images, videos, 
+        media_attachments (List[str], optional): A list of file paths to local audio, images, videos, 
                                                  or PDFs. Defaults to None.
         upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
@@ -583,7 +592,7 @@ def prompt_gemini_3(
         model (str): Defaults to "gemini-3-pro-preview".
         prompt (str): The text prompt.
         response_schema (Any, optional): Structured output schema.
-        media_attachments (List[str], optional): List of file paths (Images, Videos, PDFs).
+        media_attachments (List[str], optional): List of file paths (Audio, Images, Videos, PDFs).
         upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
         thinking_level (str): "low" (faster) or "high" (deep reasoning). Defaults to "high".
         media_resolution (str): "low", "medium", or "high". Applies to images, videos and PDFs.
