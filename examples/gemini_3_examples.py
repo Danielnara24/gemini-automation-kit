@@ -252,7 +252,7 @@ def example_youtube_simple_url():
     """
     9. Simple YouTube URL.
     """
-    print("--- Running Example 10: YouTube URL ---")
+    print("--- Running Example 9: YouTube URL ---")
     
     media_files = ["https://youtu.be/chr2I7CZTfk?si=wMwiIRcj0bP6uStj"]
 
@@ -270,7 +270,7 @@ def example_youtube_timestamps_summary():
     """
     10. Two YouTube videos: One using "MM:SS" timestamps, one using seconds (int/str).
     """
-    print("--- Running Example 9: YouTube Segments (Mixed Timestamps) ---")
+    print("--- Running Example 10: YouTube Segments (Mixed Timestamps) ---")
     
     # We define specific segments of interest.
     # Video 1: Uses MM:SS format.
