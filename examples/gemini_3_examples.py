@@ -2,6 +2,9 @@ import os
 from typing import List
 from pydantic import BaseModel, Field
 from gemini_kit import prompt_gemini_3, delete_all_uploads, check_api_key
+import logging
+# Configure logging to see info messages
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ==========================================
 # Pydantic Schemas for Structured Examples

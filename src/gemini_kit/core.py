@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import mimetypes
 import enum
 import pathlib
@@ -11,6 +12,8 @@ import google.genai as genai
 from google.genai import types
 from pydantic import BaseModel
 from typing import Any, List, Optional, Union, Dict
+# Initialize logger for this module
+logger = logging.getLogger(__name__) # <--- Add this
 
 
 def check_api_key():
@@ -23,8 +26,7 @@ def check_api_key():
     if 'GEMINI_API_KEY' in os.environ:
         return True
     else:
-        print("Gemini API key is not set in environment variables.")
-        print("Please set your 'GEMINI_API_KEY'.")
+        logger.warning("Gemini API key is not set in environment variables. Please set your 'GEMINI_API_KEY'.")
         return False
 
 def add_citations(response: types.GenerateContentResponse) -> str:
@@ -198,18 +200,25 @@ def _process_media_attachments(
         file_path = pathlib.Path(path)
         
         if not file_path.exists():
-            return f"Error: File not found at '{path}'"
+            msg = f"Error: File not found at '{path}'"
+            logger.error(msg)
+            return msg
 
         mime_type, _ = mimetypes.guess_type(path)
         if not mime_type:
-            return f"Error: Could not determine MIME type for '{path}'."
+            msg = f"Error: Could not determine MIME type for '{path}'."
+            logger.error(msg)
+            return msg
         
         if not (mime_type.startswith("image/") or mime_type.startswith("video/") or mime_type == "application/pdf"):
-             return f"Error: Unsupported file type '{mime_type}' for file '{path}'."
+             msg = f"Error: Unsupported file type '{mime_type}' for file '{path}'."
+             logger.error(msg)
+             return msg
 
         # Check if already uploaded
         remote_name = get_remote_file_name(client, path)
         if remote_name:
+            logger.info(f"File '{path}' found remotely as '{remote_name}'. Using existing file.")
             file_uri = f"https://generativelanguage.googleapis.com/v1beta/{remote_name}"
             final_parts.append(types.Part(
                 file_data=types.FileData(file_uri=file_uri, mime_type=mime_type),
@@ -274,11 +283,13 @@ def _process_media_attachments(
                 media_resolution=media_resolution
             ))
         except Exception as e:
-            return f"Error reading file '{item['path']}': {e}"
+            msg = f"Error reading file '{item['path']}': {e}"
+            logger.error(msg)
+            return msg
 
     # --- 6. Process Upload Files ---
     for item in upload_files:
-        print(f"Uploading '{item['path']}' ({item['size']/1024/1024:.2f} MB)...")
+        logger.info(f"Uploading '{item['path']}' ({item['size']/1024/1024:.2f} MB)...")
         try:
             uploaded_file = client.files.upload(file=item["path"])
             
@@ -288,7 +299,9 @@ def _process_media_attachments(
                 if myfile.state.name == "ACTIVE":
                     break
                 elif myfile.state.name == "FAILED":
-                    return f"Error: File processing failed for '{item['path']}' on Google's side."
+                    msg = f"Error: File processing failed for '{item['path']}' on Google's side."
+                    logger.error(msg)
+                    return msg
                 time.sleep(1)
             
             file_uri = f"https://generativelanguage.googleapis.com/v1beta/{myfile.name}"
@@ -297,35 +310,41 @@ def _process_media_attachments(
                 file_data=types.FileData(file_uri=file_uri, mime_type=item["mime"]),
                 media_resolution=media_resolution
             ))
-            print(f"Upload complete: {item['path']}")
+            logger.info(f"Upload complete: {item['path']}")
             
         except Exception as e:
-            return f"Error uploading file '{item['path']}': {e}"
+            msg = f"Error uploading file '{item['path']}': {e}"
+            logger.error(msg)
+            return msg
 
     return final_parts
 
 def delete_all_uploads():
     client = genai.Client()
     
-    print("Checking for uploaded files...")
+    logger.info("Checking for uploaded files...")
     
     # client.files.list() returns an iterator of all files
-    files = list(client.files.list())
+    try:
+        files = list(client.files.list())
+    except Exception as e:
+        logger.error(f"Failed to list files: {e}")
+        return
     
     if not files:
-        print("No files found.")
+        logger.info("No files found.")
         return
 
-    print(f"Found {len(files)} files. Starting deletion...")
+    logger.info(f"Found {len(files)} files. Starting deletion...")
 
     for f in files:
-        print(f"Deleting {f.name}...")
+        logger.info(f"Deleting {f.name}...")
         try:
             client.files.delete(name=f.name)
         except Exception as e:
-            print(f"Failed to delete {f.name}: {e}")
+            logger.error(f"Failed to delete {f.name}: {e}")
 
-    print("Cleanup complete.")
+    logger.info("Cleanup complete.")
 
 def prompt_gemini(
     model: str = "gemini-2.5-flash",
@@ -337,7 +356,7 @@ def prompt_gemini(
     google_search: bool = False,
     code_execution: bool = False,
     url_context: bool = False,
-    max_retries: int = 0
+    max_retries: int = 10
 ):
     """
     Generates content using a Gemini LLM, with optional multimodal inputs (Images, Video, PDF).
@@ -409,6 +428,7 @@ def prompt_gemini(
                 
                 # Check for RPM error
                 if "GenerateRequestsPerMinute" in str(e):
+                    logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
                 else:
                     time.sleep(1)
@@ -531,6 +551,7 @@ def prompt_gemini_structured(
                 
                 # Check for RPM error
                 if "GenerateRequestsPerMinute" in str(e):
+                    logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
                 else:
                     time.sleep(1)
@@ -645,7 +666,7 @@ def prompt_gemini_3(
             tools=tools if tools else None
         )
 
-        # --- Generation with Retry Logic ---
+        # Call API with retry logic
         response = None
         for attempt in range(max_retries + 1):
             try:
@@ -663,6 +684,7 @@ def prompt_gemini_3(
                 
                 # Check for RPM error
                 if "GenerateRequestsPerMinute" in str(e):
+                    logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
                 else:
                     time.sleep(1)
