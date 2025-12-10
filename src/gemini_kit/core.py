@@ -359,6 +359,7 @@ def prompt_gemini(
     model: str = "gemini-2.5-flash",
     prompt: str = "",
     media_attachments: List[str] = None,
+    response_schema: Any = None,
     upload_threshold_mb: float = 20.0,
     thinking: bool = True,
     temperature: float = 1.0,
@@ -368,13 +369,14 @@ def prompt_gemini(
     max_retries: int = 0
 ):
     """
-    Generates content using a Gemini LLM, with optional multimodal inputs (Audio, Images, Video, PDF).
+    Generates content using a Gemini LLM, supports structured output (JSON/Enum) and multimodal inputs.
 
     Args:
         model (str): The name of the Gemini model to use.
         prompt (str): The text prompt to send to the model.
-        media_attachments (List[str], optional): A list of file paths to local audio, images, videos, 
-                                                 or PDFs to include in the prompt. Defaults to None.
+        media_attachments (List[str], optional): A list of file paths (audio, images, videos, PDFs).
+        response_schema (Any, optional): Schema for structured output (Pydantic model or Enum).
+                                         NOTE: Cannot be used with tools (search/code) on Gemini 2.5.
         upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
         thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
         temperature (float, optional): Controls randomness. Defaults to 1.0.
@@ -384,10 +386,18 @@ def prompt_gemini(
         max_retries (int, optional): Number of times to retry the API call if it fails. Defaults to 0.
 
     Returns:
-        tuple (str, int): A tuple containing the generated text response and the number of input tokens.
-                          Returns (error_message, 0) if an error occurs.
+        tuple (str | Any, int): A tuple containing the response (text or parsed object) and input token count.
     """
     try:
+        # --- VALIDATION CHECK ---
+        # Disable tools if response_schema is provided
+        if response_schema and (google_search or code_execution or url_context):
+            logger.warning("Warning: response_schema cannot be used with tools (google_search, code_execution, url_context) on Gemini 2.5. Disabling all tools.")
+            google_search = False
+            code_execution = False
+            url_context = False
+
+
         client = genai.Client()
         # Standard models use thinking_budget
         thinking_budget = -1 if thinking else 0
@@ -401,10 +411,20 @@ def prompt_gemini(
         if url_context:
             tools.append(types.Tool(url_context={}))
 
+        # Determine MIME type for response
+        response_mime_type = "text/plain"
+        if response_schema:
+            if isinstance(response_schema, type) and issubclass(response_schema, enum.Enum):
+                response_mime_type = "text/x.enum"
+            else:
+                response_mime_type = "application/json"
+
         config = types.GenerateContentConfig(
             temperature=temperature,
             thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-            tools=tools if tools else None
+            tools=tools if tools else None,
+            response_mime_type=response_mime_type,
+            response_schema=response_schema
         )
 
         # Process Media Attachments using the new uploader
@@ -428,14 +448,10 @@ def prompt_gemini(
                     contents=contents,
                     config=config
                 )
-                # If successful, break the retry loop
                 break
             except Exception as e:
-                # If this was the last attempt, raise the exception to be handled by the outer block
                 if attempt == max_retries:
                     raise e
-                
-                # Check for RPM error
                 if "GenerateRequestsPerMinute" in str(e):
                     logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
@@ -443,6 +459,10 @@ def prompt_gemini(
                     time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
+        
+        if response_schema:
+            return response.parsed, input_token_count
+
         full_response = ""
 
         try:
@@ -484,89 +504,6 @@ def prompt_gemini(
                 full_response = "Error: The response was empty or blocked. No content generated."
 
         return full_response, input_token_count
-
-    except Exception as e:
-        return f"An error occurred during content generation: {e}", 0
-
-def prompt_gemini_structured(
-    model: str = "gemini-2.5-flash",
-    prompt: str = "",
-    response_schema: Any = None,
-    media_attachments: List[str] = None,
-    upload_threshold_mb: float = 20.0,
-    thinking: bool = True,
-    temperature: float = 1.0,
-    max_retries: int = 0
-):
-    """
-    Generates structured content (JSON/Enum) using a Gemini LLM, with optional multimodal inputs.
-
-    Args:
-        model (str): The name of the Gemini model to use.
-        prompt (str): The text prompt.
-        response_schema (Any): The schema for the structured output (Pydantic model or Enum).
-        media_attachments (List[str], optional): A list of file paths to local audio, images, videos, 
-                                                 or PDFs. Defaults to None.
-        upload_threshold_mb (float): Limit in MB for inline data before forcing upload. Defaults to 20.0.
-        thinking (bool, optional): Enables or disables the thinking feature. Defaults to True.
-        temperature (float, optional): Creativity allowed. Defaults to 1.0.
-        max_retries (int, optional): Number of times to retry the API call if it fails. Defaults to 0.
-
-    Returns:
-        tuple (Any, int): A tuple containing the structured response and input tokens.
-    """
-    try:
-        client = genai.Client()
-        thinking_budget = -1 if thinking else 0
-
-        mime_type = "application/json"
-        if isinstance(response_schema, type) and issubclass(response_schema, enum.Enum):
-            mime_type = "text/x.enum"
-
-        config = {
-            "temperature": temperature,
-            "thinking_config": {"thinking_budget": thinking_budget},
-            "response_mime_type": mime_type,
-            "response_schema": response_schema,
-        }
-
-        # Process Media Attachments
-        media_parts = []
-        if media_attachments:
-            result = _process_media_attachments(client, media_attachments, inline_limit_mb=upload_threshold_mb)
-            if isinstance(result, str): # Error message
-                return result, 0
-            media_parts = result
-
-        # Construct Contents
-        text_part = types.Part(text=prompt)
-        contents = media_parts + [text_part]
-
-        # Call API with retry logic
-        response = None
-        for attempt in range(max_retries + 1):
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config
-                )
-                # If successful, break the retry loop
-                break
-            except Exception as e:
-                # If this was the last attempt, raise the exception to be handled by the outer block
-                if attempt == max_retries:
-                    raise e
-                
-                # Check for RPM error
-                if "GenerateRequestsPerMinute" in str(e):
-                    logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
-                    time.sleep(50)
-                else:
-                    time.sleep(1)
-
-        input_token_count = response.usage_metadata.prompt_token_count
-        return response.parsed, input_token_count
 
     except Exception as e:
         return f"An error occurred during content generation: {e}", 0

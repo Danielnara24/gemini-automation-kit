@@ -153,7 +153,31 @@ response, tokens = prompt_gemini(
 print(response)
 ```
 
-### 3. Gemini 3: Search + Code + JSON
+### 3. Structured Output (Pydantic)
+Enforce a JSON schema on the output. 
+*Note: In Gemini 2.5, you cannot combine Structured Output with Tools (Search/Code).*
+
+```python
+from pydantic import BaseModel
+from gemini_kit import prompt_gemini
+
+class MovieIdea(BaseModel):
+    title: str
+    logline: str
+    estimated_budget: int
+
+response_obj, tokens = prompt_gemini(
+    model="gemini-2.5-flash",
+    prompt="Generate a movie idea about a robot learning to paint.",
+    response_schema=MovieIdea
+)
+
+# Returns a MovieIdea object directly
+print(f"Title: {response_obj.title}")
+print(f"Budget: ${response_obj.estimated_budget}")
+```
+
+### 4. Gemini 3: Search + Code + JSON
 ```python
 from pydantic import BaseModel
 from gemini_kit import prompt_gemini_3
@@ -175,7 +199,7 @@ response_obj, tokens = prompt_gemini_3(
 print(f"Ratio: {response_obj.ratio} | Summary: {response_obj.summary}")
 ```
 
-### 4. Cleanup
+### 5. Cleanup
 Free up server storage space (deletes files uploaded via Files API).
 ```python
 from gemini_kit import delete_all_uploads
@@ -183,15 +207,14 @@ from gemini_kit import delete_all_uploads
 delete_all_uploads()
 ```
 
-## More Examples
-
-The `examples/` folder in this repository contains scripts demonstrating specific use cases.
+> [!TIP]
+> The `examples/` folder in this repository contains scripts demonstrating specific use cases.
 
 ## Arguments
 
 *   **model:** The name of the Gemini model to use (e.g., "gemini-2.5-flash", "gemini-3-pro-preview").
 *   **prompt:** The text instruction sent to the model.
-*   **response_schema:** Pydantic model or Enum class to enforce structured JSON output.
+*   **response_schema:** Pydantic model or Enum class to enforce structured JSON output. (Note: In `prompt_gemini`, this disables tools).
 *   **media_attachments:** List of file paths (audio, images, videos, PDFs) or YouTube URLs to analyze.
 *   **upload_threshold_mb:** Files larger than this (in MB) are uploaded via Files API; smaller are sent inline.
 *   **thinking_level:** Controls reasoning depth for Gemini 3 ("low" or "high").

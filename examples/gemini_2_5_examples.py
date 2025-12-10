@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from gemini_kit import prompt_gemini, prompt_gemini_structured, delete_all_uploads, check_api_key
+from gemini_kit import prompt_gemini, delete_all_uploads, check_api_key
 import logging
 # Configure logging to see info messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,7 +65,7 @@ def example_structured_no_tools():
     
     prompt = "Invent a sci-fi movie concept about time travel in the year 3000."
     
-    response, tokens = prompt_gemini_structured(
+    response, tokens = prompt_gemini(
         model="gemini-2.5-pro",
         prompt=prompt,
         response_schema=MovieAnalysis,
@@ -120,7 +120,7 @@ def example_video_structured():
 
     prompt = "Analyze this video and log the specific events happening."
 
-    response, tokens = prompt_gemini_structured(
+    response, tokens = prompt_gemini(
         model="gemini-2.5-pro",
         prompt=prompt,
         media_attachments=[video_path],
