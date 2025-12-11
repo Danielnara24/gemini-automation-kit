@@ -1,3 +1,7 @@
+import requests
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+import io
+import json
 import os
 import sys
 import logging
@@ -658,3 +662,172 @@ def prompt_gemini_3(
 
     except Exception as e:
         return f"An error occurred during content generation: {e}", 0
+    
+# --- Helper Functions for Detection ---
+
+def _clean_json_markdown(text: str) -> str:
+    """Removes markdown code fencing from JSON strings."""
+    if "```json" in text:
+        text = text.split("```json")[1]
+    if "```" in text:
+        text = text.split("```")[0]
+    return text.strip()
+
+def _visualize_2d(image_path_or_url: str, bounding_boxes: List[Dict[str, Any]]) -> Image.Image:
+    """
+    Draws bounding boxes and labels on the image. 
+    Handles both local paths and URLs for the source image.
+    """
+    try:
+        # Load Image
+        if str(image_path_or_url).startswith(('http://', 'https://')):
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            im = Image.open(io.BytesIO(response.content))
+        else:
+            im = Image.open(image_path_or_url)
+        
+        # Ensure image is in a mode that supports color drawing
+        if im.mode != 'RGB':
+            im = im.convert('RGB')
+
+        draw = ImageDraw.Draw(im)
+        width, height = im.size
+        
+        # distinct colors for different objects
+        colors = [
+            'red', 'green', 'blue', 'yellow', 'orange', 'pink', 'purple', 
+            'cyan', 'magenta', 'lime', 'teal', 'coral'
+        ]
+
+        # Use default font or try to load a better one if available
+        try:
+            # Try loading a standard font, fallback to default
+            font = ImageFont.truetype("arial.ttf", 16)
+        except IOError:
+            font = ImageFont.load_default()
+
+        for i, box_data in enumerate(bounding_boxes):
+            box = box_data.get("box_2d")
+            label = box_data.get("label", "Object")
+            
+            if not box or len(box) != 4:
+                continue
+
+            ymin, xmin, ymax, xmax = box
+            
+            abs_y1 = int(ymin / 1000 * height)
+            abs_x1 = int(xmin / 1000 * width)
+            abs_y2 = int(ymax / 1000 * height)
+            abs_x2 = int(xmax / 1000 * width)
+
+            # Draw Rectangle
+            color = colors[i % len(colors)]
+            draw.rectangle(((abs_x1, abs_y1), (abs_x2, abs_y2)), outline=color, width=3)
+            
+            # Draw Label with background
+            text_bbox = draw.textbbox((abs_x1, abs_y1), label, font=font)
+            # offset label slightly above or inside box
+            text_loc = (abs_x1, max(0, abs_y1 - 20))
+            
+            # optional: draw text background for readability
+            draw.rectangle(draw.textbbox(text_loc, label, font=font), fill=color)
+            draw.text(text_loc, label, fill="black" if color in ['yellow', 'lime', 'cyan'] else "white", font=font)
+
+        return im
+    except Exception as e:
+        logger.error(f"Failed to visualize detection: {e}")
+        return None
+
+# --- Main Detect Function ---
+
+def detect_2d(
+    model: str = "gemini-2.5-flash-lite",
+    prompt: str = "Detect all items.",
+    image_path: str = None,
+    visual: bool = False,
+    temperature: float = 0.5,
+    max_retries: int = 0
+) -> tuple[Union[List[Dict[str, Any]], str], Optional[Image.Image]]:
+    """
+    Performs 2D object detection on an image using Gemini.
+    
+    Args:
+        model (str): The model to use.
+        prompt (str): Instructions on what to detect.
+        image_path (str): Local path or URL to the image.
+        visual (bool): If True, returns a PIL Image with bounding boxes drawn.
+        temperature (float): Model temperature. Docs suggest ~0.5 for detection.
+        max_retries (int): Retry attempts.
+
+    Returns:
+        tuple: (JSON Data [List of Dicts], PIL Image [or None])
+    """
+    if not image_path:
+        return "Error: image_path is required.", None
+
+    # Handle client initialization based on model family
+    if "gemini-3" in model:
+         client = genai.Client(http_options={'api_version': 'v1alpha'})
+    else:
+         client = genai.Client()
+
+    # 1. System Instructions (Exact string requested)
+    system_instruction = """
+        Return bounding boxes as a JSON array with labels. Never return masks or code fencing. Limit to 25 objects.
+        "label" should be each item's unique characteristics (colors, size, position, adjectives, etc..).
+    """
+
+    # 2. Configure Thinking based on model
+    if model == "gemini-2.5-pro":
+        thinking_config = types.ThinkingConfig(include_thoughts=False)
+    elif model == "gemini-3-pro-preview":
+        thinking_config = types.ThinkingConfig(thinking_level="low")
+    else:
+        thinking_config = types.ThinkingConfig(thinking_budget=0)
+
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=temperature,
+        system_instruction=system_instruction,
+        thinking_config=thinking_config
+    )
+
+    # 3. Process Media
+    media_parts = _process_media_attachments(client, [image_path], inline_limit_mb=20.0)
+    if isinstance(media_parts, str): 
+        return f"Media Error: {media_parts}", None
+
+    # 4. Generate Content
+    contents = media_parts + [types.Part(text=prompt)]
+    
+    response_text = ""
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+            response_text = response.text
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Detection failed: {e}")
+                return f"Error: {e}", None
+            time.sleep(1)
+
+    # 5. Parse Output
+    try:
+        clean_json = _clean_json_markdown(response_text)
+        json_data = json.loads(clean_json)
+    except json.JSONDecodeError:
+        logger.error(f"Failed to parse JSON response: {response_text}")
+        return f"Error: Could not parse model response. Raw: {response_text}", None
+
+    # 6. Visualization
+    annotated_image = None
+    if visual:
+        annotated_image = _visualize_2d(image_path, json_data)
+
+    return json_data, annotated_image
