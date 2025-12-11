@@ -3,7 +3,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 import io
 import json
 import os
-import sys
 import logging
 import mimetypes
 import enum
@@ -11,6 +10,7 @@ import pathlib
 import hashlib
 import base64
 import time
+import numpy as np
 import itertools
 import google.genai as genai
 from google.genai import types
@@ -829,5 +829,229 @@ def detect_2d(
     annotated_image = None
     if visual:
         annotated_image = _visualize_2d(image_path, json_data)
+
+    return json_data, annotated_image
+
+# --- Helper Functions for Segmentation Visualization ---
+
+def _visualize_segmentation(image_path_or_url: str, json_data: List[Dict[str, Any]]) -> Optional[Image.Image]:
+    """
+    Overlays segmentation masks, bounding boxes, and labels on the image.
+    """
+    try:
+        # 1. Load Image
+        if str(image_path_or_url).startswith(('http://', 'https://')):
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            im = Image.open(io.BytesIO(response.content))
+        else:
+            im = Image.open(image_path_or_url)
+
+        if im.mode != 'RGBA':
+            im = im.convert('RGBA')
+
+        width, height = im.size
+        
+        # Colors for cycling
+        colors = [
+            'red', 'green', 'blue', 'yellow', 'orange', 'pink', 'purple', 
+            'cyan', 'magenta', 'lime', 'teal', 'coral'
+        ]
+        
+        try:
+            font = ImageFont.truetype("arial.ttf", 14)
+        except IOError:
+            font = ImageFont.load_default()
+
+        # Create a separate layer for drawing boxes/text later so they appear on top of masks
+        text_layer = Image.new('RGBA', im.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(text_layer)
+
+        # 2. Process each item
+        for i, item in enumerate(json_data):
+            box = item.get("box_2d")
+            mask_b64 = item.get("mask")
+            label = item.get("label", "Object")
+            
+            if not box or not mask_b64:
+                continue
+
+            # Parse Box [ymin, xmin, ymax, xmax] normalized 0-1000
+            ymin, xmin, ymax, xmax = box
+            abs_y0 = int(ymin / 1000 * height)
+            abs_x0 = int(xmin / 1000 * width)
+            abs_y1 = int(ymax / 1000 * height)
+            abs_x1 = int(xmax / 1000 * width)
+
+            # Sanity check coords
+            if abs_y0 >= abs_y1 or abs_x0 >= abs_x1:
+                continue
+
+            color_name = colors[i % len(colors)]
+            try:
+                rgb_color = ImageColor.getrgb(color_name)
+            except:
+                rgb_color = (255, 0, 0) # Fallback
+
+            # --- Handle Mask ---
+            try:
+                # Clean base64 string
+                if "base64," in mask_b64:
+                    mask_b64 = mask_b64.split("base64,")[1]
+                
+                mask_data = base64.b64decode(mask_b64)
+                mask_img = Image.open(io.BytesIO(mask_data))
+                
+                # Resize mask to fit the bounding box exactly
+                box_width = abs_x1 - abs_x0
+                box_height = abs_y1 - abs_y0
+                mask_img = mask_img.resize((box_width, box_height), Image.Resampling.BILINEAR)
+                
+                # Convert to numpy to process thresholding
+                mask_arr = np.array(mask_img)
+                
+                # Create a colored overlay for this specific object
+                # Initialize fully transparent overlay for the size of the bbox
+                object_overlay = np.zeros((box_height, box_width, 4), dtype=np.uint8)
+                
+                # Where mask > 127 (confidence), apply color with alpha
+                threshold = 127
+                mask_indices = mask_arr > threshold
+                
+                # Apply color (R, G, B, Alpha=160)
+                object_overlay[mask_indices] = rgb_color + (160,)
+                
+                # Convert back to PIL
+                overlay_pil = Image.fromarray(object_overlay, 'RGBA')
+                
+                # Paste onto the main image at the specific coordinates
+                im.alpha_composite(overlay_pil, (abs_x0, abs_y0))
+
+            except Exception as e:
+                logger.warning(f"Failed to process mask for {label}: {e}")
+
+            # --- Draw Box and Label (on text layer) ---
+            draw.rectangle(((abs_x0, abs_y0), (abs_x1, abs_y1)), outline=color_name, width=3)
+            
+            # Label background
+            text_loc = (abs_x0, max(0, abs_y0 - 20))
+            draw.rectangle(draw.textbbox(text_loc, label, font=font), fill=color_name)
+            draw.text(text_loc, label, fill="black" if color_name in ['yellow', 'lime', 'cyan'] else "white", font=font)
+
+        # Composite text layer onto image
+        final_image = Image.alpha_composite(im, text_layer)
+        return final_image.convert('RGB') # Return standard RGB
+
+    except Exception as e:
+        logger.error(f"Visualization failed: {e}")
+        return None
+
+# --- Main Segmentation Function ---
+
+def segmentation(
+    model: str = "gemini-2.5-flash",
+    prompt: str = "Segment all items.",
+    image_path: str = None,
+    visual: bool = False,
+    temperature: float = 0.5,
+    max_retries: int = 0
+) -> tuple[Union[List[Dict[str, Any]], str], Optional[Image.Image]]:
+    """
+    Performs object segmentation on an image using Gemini.
+    
+    Args:
+        model (str): The model to use (must be Gemini 2.5 or newer).
+        prompt (str): Instructions on what to segment.
+        image_path (str): Local path or URL to the image.
+        visual (bool): If True, returns a PIL Image with masks and boxes drawn.
+        temperature (float): Model temperature.
+        max_retries (int): Retry attempts.
+
+    Returns:
+        tuple: (JSON Data [List of Dicts], PIL Image [or None])
+    """
+    if not image_path:
+        return "Error: image_path is required.", None
+
+    # Handle client initialization
+    if "gemini-3" in model:
+         client = genai.Client(http_options={'api_version': 'v1alpha'})
+    else:
+         client = genai.Client()
+
+    # 1. System Instructions (Strict format for segmentation)
+    system_instruction = """
+    Output a JSON list of segmentation masks where each entry contains:
+    1. The 2D bounding box in the key "box_2d" (normalized 0-1000 [ymin, xmin, ymax, xmax]).
+    2. The segmentation mask in key "mask" (Base64 encoded PNG).
+    3. The text label in the key "label". 
+    Use descriptive labels. Do not return markdown code fencing.
+    """
+
+    # 2. Configure Thinking (Critical for valid JSON/Masks)
+    if "gemini-2.5-pro" in model:
+        # 2.5 Pro uses include_thoughts
+        thinking_config = types.ThinkingConfig(include_thoughts=False)
+    elif "gemini-3-pro-preview" in model:
+        return "Error: gemini-3-pro-preview does not support segmentation. Try other models instead.", None
+    else:
+        # Standard Flash models use budget
+        thinking_config = types.ThinkingConfig(thinking_budget=0)
+
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=temperature,
+        system_instruction=system_instruction,
+        thinking_config=thinking_config
+    )
+
+    # 3. Process Media
+    # Note: Using your existing helper _process_media_attachments if available,
+    # otherwise falling back to manual loading logic here for safety.
+    try:
+        if 'http' in image_path:
+            img_resp = requests.get(image_path)
+            img_data = img_resp.content
+            mime_type = "image/jpeg" # Default assumption or parse from headers
+        else:
+            with open(image_path, 'rb') as f:
+                img_data = f.read()
+            mime_type = "image/jpeg" # Default assumption
+            
+        image_part = types.Part.from_bytes(data=img_data, mime_type=mime_type)
+    except Exception as e:
+        return f"Media Error: {str(e)}", None
+
+    # 4. Generate Content
+    contents = [image_part, prompt]
+    
+    response_text = ""
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+            response_text = response.text
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Segmentation failed: {e}")
+                return f"Error: {e}", None
+            time.sleep(1)
+
+    # 5. Parse Output
+    try:
+        clean_json = _clean_json_markdown(response_text) # Uses your existing helper
+        json_data = json.loads(clean_json)
+    except json.JSONDecodeError:
+        logger.error(f"Failed to parse JSON response: {response_text}")
+        return f"Error: Could not parse model response. Raw: {response_text}", None
+
+    # 6. Visualization
+    annotated_image = None
+    if visual:
+        annotated_image = _visualize_segmentation(image_path, json_data)
 
     return json_data, annotated_image
