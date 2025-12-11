@@ -760,14 +760,14 @@ def vision_understanding(
     
     if task == "detect_2d":
         base_instruction = """
-            Return bounding boxes as a JSON array with labels. Never return masks or code fencing. MAXIMUM 25 OBJECTS. BE CERTAIN OF EACH OBJECT.
+            Return bounding boxes as a JSON array with labels. Never return masks or code fencing. MAXIMUM 25 OBJECTS.
             If an object is present multiple times, name them according to their unique characteristic (colors, size, position, unique characteristics, etc..).
             Output format: list of objects with keys 'label' and 'box_2d'.
             box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
         """
     elif task == "pointing":
         base_instruction = """
-            Point to the items described. MAXIMUM 25 OBJECTS. BE CERTAIN OF EACH OBJECT.
+            Point to the items described. MAXIMUM 25 OBJECTS.
             The answer should follow the json format:
             [{\"point\": [y, x], \"label\": \"your_label\"}, ...]
             The points are in [y, x] format normalized to 0-1000.
@@ -782,9 +782,9 @@ def vision_understanding(
         """
     elif task == "segmentation":
         base_instruction = """
-            "Output a JSON list of segmentation masks where each entry contains the 2D "
-            "bounding box in the key 'box_2d' ([ymin, xmin, ymax, xmax] 0-1000), "
-            "the segmentation mask in key 'mask' (base64 png), and the text label in the key 'label'."
+            Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key 'box_2d' ([ymin, xmin, ymax, xmax] 0-1000),
+            the segmentation mask in key 'mask' (base64 png), and the text label in the key 'label'.
+            MAXIMUM 25 OBJECTS.
         """
 
     # --- API Call ---
