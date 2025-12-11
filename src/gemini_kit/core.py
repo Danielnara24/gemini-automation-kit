@@ -1223,13 +1223,13 @@ def pointing(
         model (str): The model to use.
         prompt (str): Instructions on what to point to.
         image_path (str): Local path or URL to the image.
+        context: A list of previous images (paths/urls) or text/JSON strings to provide history.
         visual (bool): If True, returns a PIL Image with points drawn.
         temperature (float): Model temperature (docs suggest >0, e.g., 0.5).
         max_retries (int): Retry attempts.
 
     Returns:
         tuple: (JSON Data [List of Dicts], PIL Image [or None])
-        context: A list of previous images (paths/urls) or text/JSON strings to provide history.
     """
     if not image_path:
         return "Error: image_path is required.", None
