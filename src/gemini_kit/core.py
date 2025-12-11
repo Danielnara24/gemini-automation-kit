@@ -836,10 +836,10 @@ def detect_2d(
 
 def _visualize_segmentation(image_path_or_url: str, json_data: List[Dict[str, Any]]) -> Optional[Image.Image]:
     """
-    Overlays segmentation masks, bounding boxes, and labels on the image.
+    Overlays all segmentation masks, bounding boxes, and labels on a single image.
     """
     try:
-        # 1. Load Image
+        # Load Image
         if str(image_path_or_url).startswith(('http://', 'https://')):
             response = requests.get(image_path_or_url, stream=True)
             response.raise_for_status()
@@ -863,11 +863,10 @@ def _visualize_segmentation(image_path_or_url: str, json_data: List[Dict[str, An
         except IOError:
             font = ImageFont.load_default()
 
-        # Create a separate layer for drawing boxes/text later so they appear on top of masks
+        # Text layer
         text_layer = Image.new('RGBA', im.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(text_layer)
 
-        # 2. Process each item
         for i, item in enumerate(json_data):
             box = item.get("box_2d")
             mask_b64 = item.get("mask")
@@ -876,14 +875,12 @@ def _visualize_segmentation(image_path_or_url: str, json_data: List[Dict[str, An
             if not box or not mask_b64:
                 continue
 
-            # Parse Box [ymin, xmin, ymax, xmax] normalized 0-1000
             ymin, xmin, ymax, xmax = box
             abs_y0 = int(ymin / 1000 * height)
             abs_x0 = int(xmin / 1000 * width)
             abs_y1 = int(ymax / 1000 * height)
             abs_x1 = int(xmax / 1000 * width)
 
-            # Sanity check coords
             if abs_y0 >= abs_y1 or abs_x0 >= abs_x1:
                 continue
 
@@ -891,60 +888,127 @@ def _visualize_segmentation(image_path_or_url: str, json_data: List[Dict[str, An
             try:
                 rgb_color = ImageColor.getrgb(color_name)
             except:
-                rgb_color = (255, 0, 0) # Fallback
+                rgb_color = (255, 0, 0)
 
-            # --- Handle Mask ---
             try:
-                # Clean base64 string
+                # Handle Mask
                 if "base64," in mask_b64:
                     mask_b64 = mask_b64.split("base64,")[1]
                 
                 mask_data = base64.b64decode(mask_b64)
                 mask_img = Image.open(io.BytesIO(mask_data))
                 
-                # Resize mask to fit the bounding box exactly
-                box_width = abs_x1 - abs_x0
-                box_height = abs_y1 - abs_y0
-                mask_img = mask_img.resize((box_width, box_height), Image.Resampling.BILINEAR)
-                
-                # Convert to numpy to process thresholding
+                # Resize
+                mask_img = mask_img.resize((abs_x1 - abs_x0, abs_y1 - abs_y0), Image.Resampling.BILINEAR)
                 mask_arr = np.array(mask_img)
                 
-                # Create a colored overlay for this specific object
-                # Initialize fully transparent overlay for the size of the bbox
-                object_overlay = np.zeros((box_height, box_width, 4), dtype=np.uint8)
+                # Overlay
+                object_overlay = np.zeros((abs_y1 - abs_y0, abs_x1 - abs_x0, 4), dtype=np.uint8)
+                mask_indices = mask_arr > 127
+                object_overlay[mask_indices] = rgb_color + (160,) # Color + Alpha
                 
-                # Where mask > 127 (confidence), apply color with alpha
-                threshold = 127
-                mask_indices = mask_arr > threshold
-                
-                # Apply color (R, G, B, Alpha=160)
-                object_overlay[mask_indices] = rgb_color + (160,)
-                
-                # Convert back to PIL
                 overlay_pil = Image.fromarray(object_overlay, 'RGBA')
-                
-                # Paste onto the main image at the specific coordinates
                 im.alpha_composite(overlay_pil, (abs_x0, abs_y0))
 
             except Exception as e:
                 logger.warning(f"Failed to process mask for {label}: {e}")
 
-            # --- Draw Box and Label (on text layer) ---
+            # Draw Box and Label
             draw.rectangle(((abs_x0, abs_y0), (abs_x1, abs_y1)), outline=color_name, width=3)
-            
-            # Label background
             text_loc = (abs_x0, max(0, abs_y0 - 20))
             draw.rectangle(draw.textbbox(text_loc, label, font=font), fill=color_name)
             draw.text(text_loc, label, fill="black" if color_name in ['yellow', 'lime', 'cyan'] else "white", font=font)
 
-        # Composite text layer onto image
         final_image = Image.alpha_composite(im, text_layer)
-        return final_image.convert('RGB') # Return standard RGB
+        return final_image.convert('RGB')
 
     except Exception as e:
         logger.error(f"Visualization failed: {e}")
         return None
+
+def _save_segmentation_artifacts(image_path_or_url: str, json_data: List[Dict[str, Any]], output_dir: str):
+    """
+    Saves individual masks and overlay images for each detected item to the output directory.
+    """
+    try:
+        # Load Image
+        if str(image_path_or_url).startswith(('http://', 'https://')):
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            im = Image.open(io.BytesIO(response.content))
+        else:
+            im = Image.open(image_path_or_url)
+
+        if im.mode != 'RGBA':
+            im = im.convert('RGBA')
+
+        os.makedirs(output_dir, exist_ok=True)
+        width, height = im.size
+
+        for i, item in enumerate(json_data):
+            label = item.get("label", "unknown").replace(" ", "_")
+            box = item.get("box_2d")
+            mask_b64 = item.get("mask")
+
+            if not box or not mask_b64:
+                continue
+
+            # Coordinates
+            ymin, xmin, ymax, xmax = box
+            y0 = int(ymin / 1000 * height)
+            x0 = int(xmin / 1000 * width)
+            y1 = int(ymax / 1000 * height)
+            x1 = int(xmax / 1000 * width)
+
+            if y0 >= y1 or x0 >= x1:
+                continue
+
+            # Process Mask
+            try:
+                if "base64," in mask_b64:
+                    mask_b64 = mask_b64.split("base64,")[1]
+                
+                mask_data = base64.b64decode(mask_b64)
+                mask_img = Image.open(io.BytesIO(mask_data))
+                
+                # Resize mask to bounding box
+                mask_img = mask_img.resize((x1 - x0, y1 - y0), Image.Resampling.BILINEAR)
+                mask_array = np.array(mask_img)
+
+                # 1. Save raw mask
+                mask_filename = f"{label}_{i}_mask.png"
+                mask_img.save(os.path.join(output_dir, mask_filename))
+
+                # 2. Create Overlay (White, Alpha=200)
+                # Using numpy for speed instead of pixel loop
+                overlay_arr = np.zeros((height, width, 4), dtype=np.uint8)
+                
+                # Create the specific cutout for the bbox
+                cutout = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
+                
+                # Apply white color (255, 255, 255, 200) where mask > 128
+                threshold_indices = mask_array > 128
+                cutout[threshold_indices] = (255, 255, 255, 200)
+                
+                # Place cutout into full size overlay
+                overlay_arr[y0:y1, x0:x1] = cutout
+                
+                overlay_pil = Image.fromarray(overlay_arr, 'RGBA')
+                
+                # Composite
+                composite = Image.alpha_composite(im, overlay_pil)
+                
+                # Save Overlay
+                overlay_filename = f"{label}_{i}_overlay.png"
+                composite.save(os.path.join(output_dir, overlay_filename))
+                
+                logger.info(f"Saved mask and overlay for {label} to {output_dir}")
+
+            except Exception as e:
+                logger.warning(f"Failed to save artifact for {label}: {e}")
+
+    except Exception as e:
+        logger.error(f"Failed to save segmentation artifacts: {e}")
 
 # --- Main Segmentation Function ---
 
@@ -953,6 +1017,7 @@ def segmentation(
     prompt: str = "Segment all items.",
     image_path: str = None,
     visual: bool = False,
+    segmentation_output_path: str = None,
     temperature: float = 0.5,
     max_retries: int = 0
 ) -> tuple[Union[List[Dict[str, Any]], str], Optional[Image.Image]]:
@@ -964,6 +1029,7 @@ def segmentation(
         prompt (str): Instructions on what to segment.
         image_path (str): Local path or URL to the image.
         visual (bool): If True, returns a PIL Image with masks and boxes drawn.
+        segmentation_output_path (str): If provided, saves individual masks and overlays to this directory.
         temperature (float): Model temperature.
         max_retries (int): Retry attempts.
 
@@ -1006,13 +1072,12 @@ def segmentation(
     )
 
     # 3. Process Media
-    # Note: Using your existing helper _process_media_attachments if available,
-    # otherwise falling back to manual loading logic here for safety.
     try:
-        if 'http' in image_path:
+        if str(image_path).startswith(('http://', 'https://')):
             img_resp = requests.get(image_path)
+            img_resp.raise_for_status()
             img_data = img_resp.content
-            mime_type = "image/jpeg" # Default assumption or parse from headers
+            mime_type = "image/jpeg" # Default assumption
         else:
             with open(image_path, 'rb') as f:
                 img_data = f.read()
@@ -1043,15 +1108,38 @@ def segmentation(
 
     # 5. Parse Output
     try:
-        clean_json = _clean_json_markdown(response_text) # Uses your existing helper
+        clean_json = _clean_json_markdown(response_text)
         json_data = json.loads(clean_json)
     except json.JSONDecodeError:
         logger.error(f"Failed to parse JSON response: {response_text}")
         return f"Error: Could not parse model response. Raw: {response_text}", None
 
-    # 6. Visualization
+    # 6. Saving Artifacts to Disk
+    if segmentation_output_path:
+        _save_segmentation_artifacts(image_path, json_data, segmentation_output_path)
+
+    # 7. Visualization (Combined Image)
     annotated_image = None
     if visual:
         annotated_image = _visualize_segmentation(image_path, json_data)
 
     return json_data, annotated_image
+
+
+# Segmentation example
+
+json_result, annotated_img = segmentation(
+    model="gemini-2.5-pro",
+    prompt="Segment all pillows in the image",
+    image_path="/home/daniel/Downloads/Modern_living_room_with_clean_lines_and_grey_sofa_set.webp",
+    segmentation_output_path="/home/daniel/Documents/segmentation_output",
+    visual=True,
+    temperature=0.5,
+    max_retries=2
+)
+
+print("Segmentation JSON Result:")
+print(json_result)
+
+if annotated_img:
+    annotated_img.show()  # Display the image with segmentation overlays
