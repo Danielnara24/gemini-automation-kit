@@ -1129,7 +1129,7 @@ def segmentation(
 
 def _visualize_points(image_path_or_url: str, json_data: List[Dict[str, Any]]) -> Optional[Image.Image]:
     """
-    Draws points and labels on the image based on Gemini's pointing output.
+    Draws points and labels. Handles both standard pointing and multiview (in_frame check).
     """
     try:
         # Load Image
@@ -1146,23 +1146,24 @@ def _visualize_points(image_path_or_url: str, json_data: List[Dict[str, Any]]) -
         draw = ImageDraw.Draw(im)
         width, height = im.size
         
-        # distinct colors for different points
-        colors = [
-            'red', 'lime', 'blue', 'yellow', 'cyan', 'magenta', 'orange', 
-            'purple', 'pink', 'teal', 'coral', 'gold'
-        ]
-        
+        colors = ['red', 'lime', 'blue', 'yellow', 'cyan', 'magenta', 'orange', 'purple']
         try:
             font = ImageFont.truetype("arial.ttf", 16)
         except IOError:
             font = ImageFont.load_default()
 
-        point_radius = 5  # Radius of the dot
+        point_radius = 5
 
         for i, item in enumerate(json_data):
+            # MULTIVIEW HANDLER: Check if item is explicitly marked out of frame
+            if item.get("in_frame") is False:
+                logger.info(f"Item '{item.get('label')}' is out of frame. Skipping.")
+                continue
+
             point = item.get("point") # Expected [y, x]
             label = item.get("label", "Point")
             
+            # If point is missing, skip
             if not point or len(point) != 2:
                 continue
 
@@ -1174,27 +1175,14 @@ def _visualize_points(image_path_or_url: str, json_data: List[Dict[str, Any]]) -
 
             color = colors[i % len(colors)]
 
-            # Draw outer circle (outline)
-            draw.ellipse(
-                (abs_x - point_radius - 2, abs_y - point_radius - 2, 
-                 abs_x + point_radius + 2, abs_y + point_radius + 2),
-                fill="white"
-            )
-            # Draw inner circle (color)
-            draw.ellipse(
-                (abs_x - point_radius, abs_y - point_radius, 
-                 abs_x + point_radius, abs_y + point_radius),
-                fill=color
-            )
+            # Draw Point (Outer White, Inner Color)
+            draw.ellipse((abs_x - point_radius - 2, abs_y - point_radius - 2, abs_x + point_radius + 2, abs_y + point_radius + 2), fill="white")
+            draw.ellipse((abs_x - point_radius, abs_y - point_radius, abs_x + point_radius, abs_y + point_radius), fill=color)
             
-            # Draw Label with background for readability
-            # Offset text slightly to the right and up
+            # Draw Label
             text_loc = (abs_x + 10, abs_y - 10)
+            if text_loc[0] > width - 50: text_loc = (abs_x - 60, abs_y - 10) # Keep on screen
             
-            # Ensure text doesn't go off-screen
-            if text_loc[0] > width - 50: text_loc = (abs_x - 60, abs_y - 10)
-            if text_loc[1] < 0: text_loc = (text_loc[0], abs_y + 10)
-
             bbox = draw.textbbox(text_loc, label, font=font)
             draw.rectangle(bbox, fill="white", outline=color, width=1)
             draw.text(text_loc, label, fill="black", font=font)
@@ -1211,12 +1199,13 @@ def pointing(
     model: str = "gemini-2.5-flash",
     prompt: str = "Point to the main items in this image.",
     image_path: str = None,
+    context: List[Any] = None, # NEW: Allows passing previous images or text
     visual: bool = False,
     temperature: float = 0.5,
     max_retries: int = 0
 ) -> tuple[Union[List[Dict[str, Any]], str], Optional[Image.Image]]:
     """
-    Performs 2D point detection (Pointing) on an image using Gemini.
+    Performs pointing or multiview correspondence.
     
     Args:
         model (str): The model to use.
@@ -1228,51 +1217,67 @@ def pointing(
 
     Returns:
         tuple: (JSON Data [List of Dicts], PIL Image [or None])
+        context: A list of previous images (paths/urls) or text/JSON strings to provide history.
     """
     if not image_path:
         return "Error: image_path is required.", None
 
-    # Handle client initialization
     if "gemini-3" in model:
          client = genai.Client(http_options={'api_version': 'v1alpha'})
     else:
          client = genai.Client()
 
     # 1. System Instructions
-    # Strictly defined based on Gemini documentation for Pointing
+    # We relax the instructions slightly to allow "in_frame" boolean for multiview
     system_instruction = """
-    Point to no more than 10 items in the image.
-    The answer should follow the json format: [{"point": <point>, "label": <label1>}, ...]. The points are in [y, x] format normalized to 0-1000. One element a line.
+    Output a JSON list of objects.
+    Format: [{"point": [y, x], "label": "string", "in_frame": boolean (optional)}, ...]
+    1. "point": [y, x] normalized 0-1000.
+    2. "in_frame": Set to false if the object from context is not visible.
+    3. Do not return markdown code fencing.
     """
 
-    # 2. Configure Generation
-    # Note: We do NOT force thinking_budget=0 here as pointing works well with 
-    # standard inference or thinking models without specific constraints.
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
         temperature=temperature,
         system_instruction=system_instruction
     )
 
-    # 3. Process Media
-    try:
-        if str(image_path).startswith(('http://', 'https://')):
-            img_resp = requests.get(image_path)
-            img_resp.raise_for_status()
-            img_data = img_resp.content
-            mime_type = "image/jpeg" # Default assumption, API handles most standard types automatically
-        else:
-            with open(image_path, 'rb') as f:
-                img_data = f.read()
-            mime_type = "image/jpeg" # Default assumption
-            
-        image_part = types.Part.from_bytes(data=img_data, mime_type=mime_type)
-    except Exception as e:
-        return f"Media Error: {str(e)}", None
+    # 2. Process Media Helper
+    def load_media(path):
+        if str(path).startswith(('http://', 'https://')):
+            resp = requests.get(path)
+            resp.raise_for_status()
+            return types.Part.from_bytes(data=resp.content, mime_type="image/jpeg")
+        elif os.path.exists(path):
+            with open(path, 'rb') as f:
+                return types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")
+        return None
 
-    # 4. Generate Content
-    contents = [image_part, prompt]
+    # 3. Build Content List
+    contents = []
+
+    # Add Context (Previous images or text)
+    if context:
+        for item in context:
+            # If it looks like an image path/url, load it
+            if isinstance(item, str) and (item.endswith(('.jpg', '.png', '.jpeg')) or item.startswith('http')):
+                 part = load_media(item)
+                 if part: contents.append(part)
+                 else: contents.append(item) # Treat as text if load fails
+            # If it looks like JSON string or plain text
+            else:
+                contents.append(str(item))
+
+    # Add Prompt
+    contents.append(prompt)
+
+    # Add Target Image
+    target_image_part = load_media(image_path)
+    if not target_image_part: return f"Media Error: Could not load {image_path}", None
+    contents.append(target_image_part)
     
+    # 4. Generate Content
     response_text = ""
     for attempt in range(max_retries + 1):
         try:
@@ -1293,14 +1298,10 @@ def pointing(
     try:
         clean_json = _clean_json_markdown(response_text)
         json_data = json.loads(clean_json)
-        
-        # Validation: Ensure list format
-        if isinstance(json_data, dict):
-            json_data = [json_data]
-            
+        if isinstance(json_data, dict): json_data = [json_data]
     except json.JSONDecodeError:
-        logger.error(f"Failed to parse JSON response: {response_text}")
-        return f"Error: Could not parse model response. Raw: {response_text}", None
+        logger.error(f"Failed to parse JSON: {response_text}")
+        return f"Error: Invalid JSON. Raw: {response_text}", None
 
     # 6. Visualization
     annotated_image = None
@@ -1308,3 +1309,6 @@ def pointing(
         annotated_image = _visualize_points(image_path, json_data)
 
     return json_data, annotated_image
+
+
+
