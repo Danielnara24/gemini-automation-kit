@@ -690,26 +690,18 @@ def _project_3d_center_to_2d(
     img_height: int, 
     fov: float = 60.0
 ) -> Optional[tuple[int, int]]:
-    """
-    Approximates the 2D pixel projection of a 3D box center.
-    Assumes standard camera intrinsics with the provided FOV.
-    """
+    """Approximates the 2D pixel projection of a 3D box center."""
     try:
         x_metric, y_metric, z_metric = box_3d[0], box_3d[1], box_3d[2]
-        
-        # Avoid division by zero or negative Z (behind camera)
-        if z_metric <= 0:
-            return None
+        if z_metric <= 0: return None # Behind camera
 
         # Calculate focal length based on FOV
         focal_length = img_width / (2 * np.tan(np.radians(fov) / 2))
-        
         cx, cy = img_width / 2, img_height / 2
         
         # Simple perspective projection
         x_px = int((x_metric / z_metric) * focal_length + cx)
         y_px = int((y_metric / z_metric) * focal_length + cy)
-        
         return (x_px, y_px)
     except Exception:
         return None
@@ -724,26 +716,14 @@ def vision_understanding(
     max_retries: int = 1
 ) -> tuple[Any, Optional[Image.Image]]:
     """
-    Performs specialized computer vision tasks using Gemini.
-
-    Args:
-        media_path (str): Path to the local image file.
-        prompt (str): Text description of what to find (e.g., "the cat", "all bottles").
-        task (str): One of 'detect_2d', 'detect_3d', 'pointing', 'segmentation'.
-        model (str): Gemini model ID.
-        visual (bool): If True, returns an annotated PIL Image.
-        segmentation_threshold (int): Threshold (0-255) for binary mask generation.
-        max_retries (int): Retry attempts.
-
-    Returns:
-        tuple: (JSON Data (List/Dict), Annotated PIL Image (or None))
+    Performs specialized computer vision tasks using Gemini with Structured Outputs.
     """
     
     valid_tasks = ['detect_2d', 'detect_3d', 'pointing', 'segmentation']
     if task not in valid_tasks:
         raise ValueError(f"Invalid task '{task}'. Must be one of {valid_tasks}")
 
-    # Load Image for processing dimensions and visualization later
+    # Load Image
     try:
         pil_image = Image.open(media_path)
         img_width, img_height = pil_image.size
@@ -753,53 +733,111 @@ def vision_understanding(
 
     client = genai.Client()
 
-    # --- Construct Task-Specific System Instructions ---
-    # These prompts are engineered based on Google's Cookbook examples for consistency.
+    # --- Define Schemas for Structured Output ---
+    # This enforces valid JSON syntax at the API level
     
-    base_instruction = ""
+    response_schema = None
     
     if task == "detect_2d":
-        base_instruction = """
-            Return bounding boxes as a JSON array with labels. Never return masks or code fencing. MAXIMUM 25 OBJECTS.
-            If an object is present multiple times, name them according to their unique characteristic (colors, size, position, unique characteristics, etc..).
-            Output format: list of objects with keys 'label' and 'box_2d'.
-            box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
-        """
+        response_schema = {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label": {"type": "STRING"},
+                    "box_2d": {
+                        "type": "ARRAY", 
+                        "items": {"type": "INTEGER"},
+                        "description": "[ymin, xmin, ymax, xmax] normalized 0-1000"
+                    }
+                },
+                "required": ["label", "box_2d"]
+            }
+        }
+        base_instruction = (
+            "Detect objects. Return 2D bounding boxes normalized to 0-1000. "
+            "Max 25 objects. Name duplicates uniquely."
+        )
+
     elif task == "pointing":
-        base_instruction = """
-            Point to the items described. MAXIMUM 25 OBJECTS.
-            The answer should follow the json format:
-            [{\"point\": [y, x], \"label\": \"your_label\"}, ...]
-            The points are in [y, x] format normalized to 0-1000.
-        """
+        response_schema = {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label": {"type": "STRING"},
+                    "point": {
+                        "type": "ARRAY", 
+                        "items": {"type": "INTEGER"},
+                        "description": "[y, x] normalized 0-1000"
+                    }
+                },
+                "required": ["label", "point"]
+            }
+        }
+        base_instruction = "Point to the items described. Max 25 objects."
+
     elif task == "detect_3d":
+        response_schema = {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label": {"type": "STRING"},
+                    "box_3d": {
+                        "type": "ARRAY", 
+                        "items": {"type": "NUMBER"},
+                        "description": "Exactly 9 numbers: [x_center, y_center, z_center, x_size, y_size, z_size, roll, pitch, yaw]"
+                    }
+                },
+                "required": ["label", "box_3d"]
+            }
+        }
+        # We keep the example in the prompt for 3D specifically to ensure semantic accuracy
         base_instruction = """
             You are an expert in 3D spatial understanding. 
             Detect the 3D bounding boxes of the requested items. NO MORE THAN 10 ITEMS.
-            Output a strict JSON list where each entry contains:
-            1. 'label': The object name.
-            2. 'box_3d': An array of exactly 9 numbers representing [x_center, y_center, z_center, x_size, y_size, z_size, roll, pitch, yaw].
+            Ensure 'box_3d' contains exactly 9 numbers: [x_center, y_center, z_center, x_size, y_size, z_size, roll, pitch, yaw].
+            
+            Example logic for format:
+            {"label": "toaster", "box_3d": [-0.94, 3.84, -0.18, 0.27, 0.16, 0.20, 0, 0, 1]}
         """
+
     elif task == "segmentation":
-        base_instruction = """
-            Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key 'box_2d' ([ymin, xmin, ymax, xmax] 0-1000),
-            the segmentation mask in key 'mask' (base64 png), and the text label in the key 'label'.
-            MAXIMUM 25 OBJECTS.
-        """
+        response_schema = {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label": {"type": "STRING"},
+                    "box_2d": {
+                        "type": "ARRAY", 
+                        "items": {"type": "INTEGER"},
+                        "description": "[ymin, xmin, ymax, xmax] normalized 0-1000"
+                    },
+                    "mask": {
+                        "type": "STRING",
+                        "description": "Base64 encoded PNG mask"
+                    }
+                },
+                "required": ["label", "box_2d", "mask"]
+            }
+        }
+        base_instruction = "Generate segmentation masks. Max 25 objects."
 
     # --- API Call ---
     config = types.GenerateContentConfig(
         system_instruction=base_instruction,
-        temperature=0.5, # Specific temp rec for vision tasks
+        temperature=0.5, 
         response_mime_type="application/json",
-        thinking_config=types.ThinkingConfig(thinking_budget=0) # Must be 0 for spatial tasks
+        response_schema=response_schema, # Pass the schema here
+        thinking_config=types.ThinkingConfig(thinking_budget=0)
     )
 
-    # We send the PIL image directly (Client handles conversion) or use the existing uploader
-    # Using the direct PIL object is faster for single images
     contents = [prompt, pil_image]
 
-    response_text = ""
+    data = []
+    
     for attempt in range(max_retries + 1):
         try:
             response = client.models.generate_content(
@@ -807,83 +845,96 @@ def vision_understanding(
                 contents=contents,
                 config=config
             )
-            response_text = response.text
+            
+            # With response_schema, the SDK automatically parses the JSON for us
+            # into response.parsed
+            if response.parsed:
+                data = response.parsed
+                # If parsed returns a dict but we expect a list (sometimes happens with single items)
+                if isinstance(data, dict):
+                    data = [data]
+            else:
+                # Fallback if parsed is empty but text exists (rare with schema)
+                try:
+                    text = response.text
+                    # Clean markdown just in case
+                    if text.strip().startswith("```json"):
+                        text = text.split("```json")[1].split("```")[0]
+                    data = json.loads(text)
+                except:
+                    raise ValueError("Empty or invalid response from model")
             break
         except Exception as e:
             if attempt == max_retries:
-                logger.error(f"Vision task failed: {e}")
+                logger.error(f"Vision task failed after retries: {e}")
+                if hasattr(response, 'text'):
+                     logger.error(f"Raw response: {response.text}")
                 return {"error": str(e)}, None
             time.sleep(2)
-
-    # --- Parse JSON ---
-    try:
-        clean_json = _extract_json_from_markdown(response_text)
-        data = json.loads(clean_json)
-    except json.JSONDecodeError:
-        logger.error("Failed to parse JSON response from Gemini.")
-        return {"error": "Invalid JSON response", "raw": response_text}, None
 
     if not visual:
         return data, None
 
     # --- Visualization Logic ---
     annotated_img = pil_image.copy()
-    draw = ImageDraw.Draw(annotated_img, "RGBA") # RGBA for transparency support
+    draw = ImageDraw.Draw(annotated_img, "RGBA")
     
-    # Try to load a font, fallback to default
     try:
         font = ImageFont.truetype("arial.ttf", 16)
     except IOError:
         font = ImageFont.load_default()
 
     for i, item in enumerate(data):
+        # Handle Pydantic objects or Dicts (SDK might return objects or dicts depending on version)
+        # We convert to dict to be safe if it's an object
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        elif hasattr(item, "__dict__"):
+            item = item.__dict__
+            
         color_name = _get_color(i)
         color_rgb = ImageColor.getrgb(color_name)
         label = item.get("label", "Object")
 
         # 1. Detect 2D
         if task == "detect_2d" and "box_2d" in item:
-            # box_2d is [ymin, xmin, ymax, xmax] 0-1000
             box = item["box_2d"]
-            ymin, xmin, ymax, xmax = box
-            
-            abs_y1 = int(ymin / 1000 * img_height)
-            abs_x1 = int(xmin / 1000 * img_width)
-            abs_y2 = int(ymax / 1000 * img_height)
-            abs_x2 = int(xmax / 1000 * img_width)
-            
-            draw.rectangle([(abs_x1, abs_y1), (abs_x2, abs_y2)], outline=color_rgb, width=3)
-            draw.text((abs_x1 + 5, abs_y1 + 5), label, fill=color_rgb, font=font)
+            if len(box) == 4:
+                ymin, xmin, ymax, xmax = box
+                abs_y1 = int(ymin / 1000 * img_height)
+                abs_x1 = int(xmin / 1000 * img_width)
+                abs_y2 = int(ymax / 1000 * img_height)
+                abs_x2 = int(xmax / 1000 * img_width)
+                
+                draw.rectangle([(abs_x1, abs_y1), (abs_x2, abs_y2)], outline=color_rgb, width=3)
+                draw.text((abs_x1 + 5, abs_y1 + 5), label, fill=color_rgb, font=font)
 
         # 2. Pointing
         elif task == "pointing" and "point" in item:
-            # point is [y, x] 0-1000
             pt = item["point"]
-            y_norm, x_norm = pt[0], pt[1]
-            
-            abs_x = int(x_norm / 1000 * img_width)
-            abs_y = int(y_norm / 1000 * img_height)
-            
-            r = 5 # radius
-            draw.ellipse([(abs_x - r, abs_y - r), (abs_x + r, abs_y + r)], fill=color_rgb, outline="white")
-            draw.text((abs_x + 8, abs_y - 8), label, fill=color_rgb, font=font)
+            if len(pt) == 2:
+                y_norm, x_norm = pt[0], pt[1]
+                abs_x = int(x_norm / 1000 * img_width)
+                abs_y = int(y_norm / 1000 * img_height)
+                
+                r = 5
+                draw.ellipse([(abs_x - r, abs_y - r), (abs_x + r, abs_y + r)], fill=color_rgb, outline="white")
+                draw.text((abs_x + 8, abs_y - 8), label, fill=color_rgb, font=font)
 
-        # 3. Detect 3D (Approximation)
+        # 3. Detect 3D (Projecting Center)
         elif task == "detect_3d" and "box_3d" in item:
-            # We only draw the center point as requested
-            center_pt = _project_3d_center_to_2d(item["box_3d"], img_width, img_height)
-            
-            if center_pt:
-                abs_x, abs_y = center_pt
-                r = 6
-                # Draw a different shape (e.g. rectangle) to distinguish from 2D pointing
-                draw.rectangle([(abs_x - r, abs_y - r), (abs_x + r, abs_y + r)], fill=color_rgb, outline="white")
-                draw.text((abs_x + 8, abs_y - 8), f"{label} (3D Center)", fill=color_rgb, font=font)
+            box_3d = item["box_3d"]
+            if isinstance(box_3d, list) and len(box_3d) >= 3:
+                center_pt = _project_3d_center_to_2d(box_3d, img_width, img_height)
+                if center_pt:
+                    abs_x, abs_y = center_pt
+                    r = 6
+                    draw.rectangle([(abs_x - r, abs_y - r), (abs_x + r, abs_y + r)], fill=color_rgb, outline="white")
+                    draw.text((abs_x + 8, abs_y - 8), f"{label} (3D)", fill=color_rgb, font=font)
 
         # 4. Segmentation
         elif task == "segmentation" and "mask" in item and "box_2d" in item:
             try:
-                # box_2d logic (same as above)
                 box = item["box_2d"]
                 ymin, xmin, ymax, xmax = box
                 abs_y1 = int(ymin / 1000 * img_height)
@@ -894,49 +945,27 @@ def vision_understanding(
                 box_w = abs_x2 - abs_x1
                 box_h = abs_y2 - abs_y1
                 
-                if box_w <= 0 or box_h <= 0: continue
-
-                # Decode Mask
-                b64_str = item["mask"].replace("data:image/png;base64,", "")
-                mask_bytes = base64.b64decode(b64_str)
-                mask_img = Image.open(io.BytesIO(mask_bytes))
-                
-                # Resize mask to bounding box size
-                mask_img = mask_img.resize((box_w, box_h), Image.Resampling.BILINEAR)
-                mask_arr = np.array(mask_img)
-                
-                # Create Colored Overlay
-                # New image size of the full image
-                overlay = Image.new('RGBA', (img_width, img_height), (0,0,0,0))
-                overlay_draw = ImageDraw.Draw(overlay)
-                
-                # We need to construct a numpy array for the specific ROI to colorize it efficiently
-                # Or simply iterate (slower but safer without heavier deps). 
-                # Let's use a simpler PIL approach: Create a solid color block, apply mask as alpha
-                
-                color_block = Image.new('RGBA', (box_w, box_h), color_rgb + (150,)) # 150 is alpha transparency
-                
-                # Use the decoded mask (L mode usually) as the alpha mask for the color block
-                # We typically need to threshold the mask from the API
-                mask_l = mask_img.convert('L')
-                # Binarize based on threshold
-                mask_l = mask_l.point(lambda p: 255 if p > segmentation_threshold else 0)
-                
-                color_block.putalpha(mask_l)
-                
-                # Paste onto the full size transparent overlay
-                overlay.paste(color_block, (abs_x1, abs_y1), color_block)
-                
-                # Composite overlay onto main image
-                annotated_img = Image.alpha_composite(annotated_img.convert('RGBA'), overlay)
-                
-                # Re-init draw object because annotated_img changed
-                draw = ImageDraw.Draw(annotated_img)
-                
-                # Draw bounding box on top
-                draw.rectangle([(abs_x1, abs_y1), (abs_x2, abs_y2)], outline=color_rgb, width=2)
-                draw.text((abs_x1, abs_y1 - 15), label, fill=color_rgb, font=font)
-
+                if box_w > 0 and box_h > 0:
+                    b64_str = item["mask"].replace("data:image/png;base64,", "")
+                    mask_bytes = base64.b64decode(b64_str)
+                    mask_img = Image.open(io.BytesIO(mask_bytes))
+                    
+                    mask_img = mask_img.resize((box_w, box_h), Image.Resampling.BILINEAR)
+                    
+                    color_block = Image.new('RGBA', (box_w, box_h), color_rgb + (150,))
+                    mask_l = mask_img.convert('L')
+                    mask_l = mask_l.point(lambda p: 255 if p > segmentation_threshold else 0)
+                    
+                    color_block.putalpha(mask_l)
+                    
+                    overlay = Image.new('RGBA', (img_width, img_height), (0,0,0,0))
+                    overlay.paste(color_block, (abs_x1, abs_y1), color_block)
+                    
+                    annotated_img = Image.alpha_composite(annotated_img.convert('RGBA'), overlay)
+                    draw = ImageDraw.Draw(annotated_img)
+                    
+                    draw.rectangle([(abs_x1, abs_y1), (abs_x2, abs_y2)], outline=color_rgb, width=2)
+                    draw.text((abs_x1, abs_y1 - 15), label, fill=color_rgb, font=font)
             except Exception as e:
                 logger.warning(f"Failed to process mask for {label}: {e}")
 
@@ -948,8 +977,8 @@ image_path = "/home/daniel/Downloads/cupcakes.jpeg" # Replace with your image
 print("--- Running 2D Detection ---")
 json_data, vis_image = vision_understanding(
     media_path=image_path,
-    prompt="Detect all cupcakes in the image. Label them according to their frosting color.",
-    task="segmentation",
+    prompt="Detect all cupcakes in the image.",
+    task="detect_3d",
     visual=True
 )
 
