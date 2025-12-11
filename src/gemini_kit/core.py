@@ -1321,4 +1321,3 @@ def pointing(
         annotated_image = _visualize_points(image_path, json_data)
 
     return json_data, annotated_image
-
