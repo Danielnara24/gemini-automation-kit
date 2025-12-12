@@ -165,6 +165,7 @@ def prompt_gemini(
                     logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
                 else:
+                    logger.warning(f"API error: {e}. Retrying...")
                     time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
@@ -342,6 +343,7 @@ def prompt_gemini_3(
                     logger.warning(f"RPM limit reached (Attempt {attempt + 1}). Sleeping for 50 seconds...")
                     time.sleep(50)
                 else:
+                    logger.warning(f"API error: {e}. Retrying...")
                     time.sleep(1)
 
         input_token_count = response.usage_metadata.prompt_token_count
@@ -458,6 +460,7 @@ def detect_2d(
             if attempt == max_retries:
                 logger.error(f"Detection failed: {e}")
                 return f"Error: {e}", None
+            logger.warning(f"API error: {e}. Retrying...")
             time.sleep(1)
 
     # 5. Parse Output
@@ -580,6 +583,7 @@ def segmentation(
             if attempt == max_retries:
                 logger.error(f"Segmentation failed: {e}")
                 return f"Error: {e}", None
+            logger.warning(f"API error: {e}. Retrying...")
             time.sleep(1)
 
     # 5. Parse Output
@@ -716,6 +720,7 @@ def pointing(
             if attempt == max_retries:
                 logger.error(f"Pointing failed: {e}")
                 return f"Error: {e}", None
+            logger.warning(f"API error: {e}. Retrying...")
             time.sleep(1)
 
     # 5. Parse Output
