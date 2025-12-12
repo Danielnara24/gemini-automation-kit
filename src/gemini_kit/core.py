@@ -463,7 +463,7 @@ def segmentation(
     prompt: str = "Segment all items.",
     image_path: str = None,
     visual: bool = False,
-    segmentation_output_path: str = None,
+    output_path: str = None,
     temperature: float = 0.5,
     max_retries: int = 0
 ) -> tuple[Union[List[Dict[str, Any]], str], Optional[Image.Image]]:
@@ -475,7 +475,7 @@ def segmentation(
         prompt (str): Instructions on what to segment.
         image_path (str): Local path or URL to the image.
         visual (bool): If True, returns a PIL Image with masks and boxes drawn.
-        segmentation_output_path (str): If provided, saves individual masks and overlays to this directory.
+        output_path (str): If provided, saves individual masks and overlays to this directory.
         temperature (float): Model temperature.
         max_retries (int): Retry attempts.
 
@@ -561,8 +561,8 @@ def segmentation(
         return f"Error: Could not parse model response. Raw: {response_text}", None
 
     # 6. Saving Artifacts to Disk
-    if segmentation_output_path:
-        _save_segmentation_artifacts(image_path, json_data, segmentation_output_path)
+    if output_path:
+        _save_segmentation_artifacts(image_path, json_data, output_path)
 
     # 7. Visualization (Combined Image)
     annotated_image = None
