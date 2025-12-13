@@ -2,8 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI Version](https://img.shields.io/pypi/v/gemini-api-toolkit)](https://pypi.org/project/gemini-api-toolkit/)
-![Maintenance](https://img.shields.io/badge/Maintained%3F-Yes-brightgreen.svg)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Danielnara24/gemini-api-toolkit/pulls)
 
 Python wrapper for the [Google Gemini API](https://ai.google.dev/gemini-api/docs) (using the official `google-genai` SDK).
 
